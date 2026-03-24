@@ -7,4 +7,12 @@ __pycache__/
 _env
 BTC.txt
 vapid_keys.json
+vapid_private.pem
+vapid_public.pem
 *.log
+*.log.*
+_db_backups/
+_backup/
+_reports/
+venv/
+btcbotapp.conf
