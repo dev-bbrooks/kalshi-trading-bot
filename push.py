@@ -1,7 +1,7 @@
 """
-push.py — Web Push notification delivery.
-Market-agnostic: delivery infrastructure only, no notify_* convenience functions.
-Those belong in each plugin's notifications.py.
+push.py — Web Push notification delivery infrastructure.
+Market-agnostic. Only handles sending — no notify_* convenience functions.
+Plugins implement their own notification logic in notifications.py.
 """
 
 import json
@@ -45,7 +45,7 @@ def send_push(subscription_info: dict, title: str, body: str,
     """
     Send a push notification to a single subscription.
     Returns True if sent, False if subscription is dead (404/410),
-    None on temporary/config failure.
+    None on temporary/config failure (don't remove subscription).
     """
     if not PUSH_AVAILABLE:
         return None

@@ -122,6 +122,6 @@ With one plugin, dashboard looks identical to current app.
 ## Phased Migration
 
 1. **Phase 1** (DONE) — Platform scaffold: all platform-level files
-2. **Phase 2** — Plugin data/strategy layer: btc_15m plugin with market_db, strategy
+2. **Phase 2** (DONE) — Plugin data/strategy layer: btc_15m plugin with market_db, strategy
 3. **Phase 3** — Trading engine: bot.py migration
 4. **Phase 4** — Dashboard: unified dashboard with plugin component injection

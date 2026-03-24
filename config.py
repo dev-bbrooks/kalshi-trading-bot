@@ -1,6 +1,6 @@
 """
 config.py — Platform constants, paths, and credentials.
-Market-agnostic. No DEFAULT_BOT_CONFIG — plugins own their own config defaults.
+Market-agnostic. No DEFAULT_BOT_CONFIG — plugins own their own config.
 """
 
 import os
@@ -54,3 +54,12 @@ DASHBOARD_HOST = "0.0.0.0"
 DASHBOARD_PORT = int(os.environ.get("DASHBOARD_PORT", 8050))
 DASHBOARD_USER = os.environ.get("DASHBOARD_USER", "admin")
 DASHBOARD_PASS = os.environ.get("DASHBOARD_PASS", "CHANGE_ME")
+
+# ── Regime Risk Thresholds ────────────────────────────────────
+REGIME_THRESHOLDS = {
+    "min_trades_known":   10,
+    "min_sim_known":      10,
+    "low_risk_floor":     65,
+    "moderate_risk_floor": 45,
+    "high_risk_floor":    25,
+}

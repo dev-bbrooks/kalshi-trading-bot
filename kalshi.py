@@ -1,7 +1,7 @@
 """
 kalshi.py — Kalshi API client with RSA-PSS authentication.
-Pure API layer — no trading logic, no database access.
-Market-agnostic: find_current_market and _build_ticker moved to plugin.
+Pure API layer — no trading logic, no database access, no market-specific code.
+find_current_market, find_next_market, and _build_ticker removed (plugin responsibility).
 """
 
 import time
@@ -115,7 +115,6 @@ def _load_private_key(path: str):
 
 
 def _sign(private_key, method: str, path: str) -> tuple:
-    """Generate RSA-PSS signature for Kalshi API request."""
     ts = str(int(time.time() * 1000))
     full_path = "/trade-api/v2" + path.split("?")[0]
     msg = (ts + method.upper() + full_path).encode("utf-8")
@@ -185,7 +184,6 @@ class KalshiClient:
     # ── Balance ────────────────────────────────────────────────
 
     def get_balance_cents(self) -> int:
-        """Cash balance in cents. Handles both legacy and _dollars migration."""
         data = self.get("/portfolio/balance")
         balance = data.get("balance")
         if balance is not None:
@@ -228,7 +226,6 @@ class KalshiClient:
 
     def place_limit_order(self, ticker: str, side: str, count: int,
                           price_cents: int, action: str = "buy") -> dict:
-        """Place a limit order. Returns the full API response."""
         price_dollars = f"{price_cents / 100:.4f}"
         count_fp = f"{count:.2f}"
         price_dollars_key = "yes_price_dollars" if side == "yes" else "no_price_dollars"
@@ -245,7 +242,6 @@ class KalshiClient:
         return resp
 
     def get_order(self, order_id: str) -> dict:
-        """Fetch order status. Returns {} on error."""
         try:
             order = self.get(f"/portfolio/orders/{order_id}").get("order", {})
             return _normalize_order(order)
@@ -253,7 +249,6 @@ class KalshiClient:
             return {}
 
     def cancel_order(self, order_id: str) -> bool:
-        """Cancel order via /decrease. Returns True if no error."""
         try:
             self.post(f"/portfolio/orders/{order_id}/decrease",
                       {"reduce_by_fp": "99999.00"})
@@ -266,9 +261,7 @@ class KalshiClient:
 
     @staticmethod
     def parse_fill(order: dict) -> dict:
-        """Extract fill details from an order response."""
         order = _normalize_order(order)
-
         fill_count = order.get("fill_count", 0)
         taker_cost = order.get("taker_fill_cost", 0) or 0
         maker_cost = order.get("maker_fill_cost", 0) or 0
@@ -279,7 +272,6 @@ class KalshiClient:
         fees = taker_fees + maker_fees
         cost_dollars = (contract_cost + fees) / 100
         fees_dollars = fees / 100
-
         avg_price_c = round(contract_cost / fill_count) if fill_count > 0 else 0
 
         return {
@@ -294,7 +286,6 @@ class KalshiClient:
 
     def poll_until_filled(self, order_id: str, target_count: int,
                           deadline: float, interval: int = 3) -> dict:
-        """Poll order status until filled, terminal, or deadline passed."""
         while time.time() < deadline:
             time.sleep(interval)
             order = self.get_order(order_id)
@@ -306,7 +297,6 @@ class KalshiClient:
         return self.parse_fill(self.get_order(order_id))
 
     def get_market_result(self, ticker: str) -> str | None:
-        """Return 'yes' or 'no' once resolved, else None."""
         result = (self.get_market(ticker).get("result") or "").lower()
         return result if result in ("yes", "no") else None
 
@@ -314,7 +304,6 @@ class KalshiClient:
 
     @staticmethod
     def get_cheaper_side(market: dict) -> tuple:
-        """Return (side, ask_price_c) for the lower-ask side."""
         yes_ask = market.get("yes_ask", 99) or 99
         no_ask = market.get("no_ask", 99) or 99
         if yes_ask <= no_ask:
@@ -328,7 +317,6 @@ class KalshiClient:
 
     @staticmethod
     def estimate_fees(shares: int, price_c: int) -> float:
-        """Estimate buy fees in dollars."""
         fee_per_contract_c = max(1, round(price_c * KALSHI_FEE_RATE))
         return shares * fee_per_contract_c / 100
 

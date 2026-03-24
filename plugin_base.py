@@ -1,6 +1,6 @@
 """
 plugin_base.py — Base class defining the market plugin interface.
-Every market plugin must subclass MarketPlugin and implement all abstract methods.
+Every market plugin must subclass MarketPlugin and implement these methods.
 """
 
 from abc import ABC, abstractmethod
@@ -8,91 +8,83 @@ from abc import ABC, abstractmethod
 
 class MarketPlugin(ABC):
     """
-    Base class for market plugins.
+    Base class for market plugins. Each plugin represents one tradeable
+    market type (e.g., BTC 15-minute binary options).
 
-    Each plugin represents one tradeable market type (e.g. BTC 15-minute binary options).
-    The platform calls these methods — plugins never import platform internals except
-    config, db, kalshi, push, and regime.
+    Lifecycle:
+      1. engine.py loads the plugin module and calls Plugin(plugin_id, db, kalshi, config)
+      2. Platform calls plugin.init_db(conn) to create plugin-specific tables
+      3. Platform starts the regime worker for the plugin's asset (if not already running)
+      4. Platform calls plugin.run() — plugin owns its entire trading loop
+      5. On shutdown, platform sets stop_event; plugin exits run() cleanly
     """
 
     @property
     @abstractmethod
     def plugin_id(self) -> str:
-        """Unique identifier, e.g. 'btc_15m'. Used as DB prefix and config namespace."""
-        ...
+        """Unique identifier for this plugin (e.g., 'btc_15m').
+        Used for config namespacing, DB table prefixes, and logging."""
 
     @property
     @abstractmethod
     def display_name(self) -> str:
-        """Human-readable name, e.g. 'BTC 15-Minute'."""
-        ...
+        """Human-readable name for dashboard display (e.g., 'BTC 15-Min')."""
 
     @property
     @abstractmethod
     def asset(self) -> str:
-        """Underlying asset ticker, e.g. 'BTC'. Shared with regime engine."""
-        ...
+        """Underlying asset this plugin trades (e.g., 'btc').
+        Used to determine which regime worker to share."""
 
-    # ── Lifecycle ──────────────────────────────────────────────
+    @property
+    @abstractmethod
+    def asset_source(self) -> str:
+        """Data source for asset prices (e.g., 'binance').
+        Paired with asset to parameterize the regime engine."""
 
     @abstractmethod
-    def init_db(self):
-        """Create plugin-specific DB tables (prefixed with plugin_id)."""
-        ...
+    def init_db(self, conn):
+        """Create plugin-specific database tables.
+        Called once on startup with an open SQLite connection.
+        Table names MUST be prefixed with the plugin's table_prefix."""
+
+    @property
+    def table_prefix(self) -> str:
+        """DB table name prefix. Default: plugin_id with dots replaced by underscores."""
+        return self.plugin_id.replace(".", "_").replace("-", "_")
 
     @abstractmethod
     def run(self, stop_event):
-        """
-        Main trading loop. Called by engine.py.
-        Must respect stop_event (threading.Event) for clean shutdown.
-        """
-        ...
+        """Main trading loop. Called by engine.py.
+        Must respect stop_event (threading.Event) — check periodically and exit when set.
+        Plugin owns its entire loop: find market → evaluate → trade → resolve."""
 
-    # ── Dashboard Components ──────────────────────────────────
-    # Each returns an HTML string fragment that gets composed into
-    # the platform's unified tabs. Return "" if nothing to show.
+    # ── Dashboard component rendering ─────────────────────────
 
-    @abstractmethod
-    def render_home_card_html(self, state: dict) -> str:
-        """Market card for the Home tab. Shows current status, active trade, etc."""
-        ...
+    def render_home_card_html(self) -> str:
+        """Return HTML for this plugin's card on the Home tab."""
+        return ""
 
-    @abstractmethod
     def render_trade_card_template(self) -> str:
-        """HTML template for a single trade row in the Trades tab."""
-        ...
+        """Return HTML/JS template for rendering trades from this plugin."""
+        return ""
 
-    @abstractmethod
     def render_regime_config_html(self) -> str:
-        """Plugin-specific regime configuration section for the Regimes tab."""
-        ...
+        """Return HTML for plugin-specific regime config on the Regimes tab."""
+        return ""
 
-    @abstractmethod
     def render_stats_section_html(self) -> str:
-        """Per-market stats breakdown for the Stats tab."""
-        ...
+        """Return HTML for plugin stats on the Stats tab."""
+        return ""
 
-    @abstractmethod
     def render_settings_html(self) -> str:
-        """Plugin-specific settings section for the Settings tab."""
-        ...
+        """Return HTML for plugin settings on the Settings tab."""
+        return ""
 
-    @abstractmethod
-    def render_header_html(self, state: dict) -> str:
-        """Header status fragment (status line, countdown, etc.)."""
-        ...
+    def render_header_html(self) -> str:
+        """Return HTML for plugin-specific header elements."""
+        return ""
 
-    @abstractmethod
     def register_routes(self, app):
-        """
-        Register plugin-specific Flask routes on the app.
-        All routes should be prefixed with /api/{plugin_id}/.
-        """
-        ...
-
-    # ── Config Defaults ────────────────────────────────────────
-
-    @abstractmethod
-    def get_default_config(self) -> dict:
-        """Return default config key-value pairs for this plugin."""
-        ...
+        """Register Flask routes for this plugin's API endpoints.
+        Called during dashboard setup with the Flask app instance."""
