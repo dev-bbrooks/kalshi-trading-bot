@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.db
+*.db-wal
+*.db-shm
+.env
+_env
+BTC.txt
+vapid_keys.json
+*.log
