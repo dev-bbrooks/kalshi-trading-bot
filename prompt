@@ -1,0 +1,147 @@
+Phase 3 — BTC 15m Trading Engine
+
+Phases 1 and 2 are complete. Platform foundation and plugin data/strategy layer all exist and import cleanly. Now build the actual trading engine — the bot.py that makes the 15-minute plugin trade.
+
+Notes from Phase 1-2 review:
+- plugin_state uses state_json TEXT blob (not individual columns). All state reads/writes must serialize/deserialize JSON. Use get_plugin_state("btc_15m") and update_plugin_state("btc_15m", {...}) from platform db.py. The update function should merge into the existing state_json, not replace it entirely.
+- plugin_id is "btc_15m" everywhere. Config keys are namespaced: btc_15m.trading_mode, btc_15m.bet_size, etc.
+- sys.path.insert(0, ...) is used in plugin files to fix imports. Keep this pattern consistent in bot.py.
+- plugin.py has an asset_source property ("binance") — can use this if needed.
+- The old codebase at /opt/15-min-btc-bot/bot.py is ~4,870 lines. Read it thoroughly for implementation details. Every nuance matters — skip paths, orphan recovery, shadow trades, Observatory feeding, FV model integration.
+
+What to build:
+
+1. plugins/btc_15m/bot.py — the full trading engine. This is the biggest file in this phase.
+
+   Functions to include (read old bot.py for implementations):
+
+   Market discovery (moved from old kalshi.py):
+   - find_current_market(client) — finds currently active 15-min BTC market
+   - _build_ticker(close_et) — builds KXBTC15M ticker string from close time in ET
+
+   Config helpers:
+   - load_config() — wrapper around platform db.get_plugin_config("btc_15m"), merges with plugin defaults
+   - get_trading_mode(cfg) — simplified, no legacy boolean fallback needed. Just reads trading_mode string.
+   - save_config_updates(updates) — writes namespaced keys to platform config
+
+   Logging:
+   - blog(level, msg, category="btc_15m") — wraps platform db.insert_log()
+   - fpnl(val) — format P&L as +$X.XX or -$X.XX
+
+   Bankroll and sizing:
+   - get_effective_bankroll_cents(cfg, client) — basic bankroll check (just balance minus in-trade amount, no money management)
+   - get_r1_bet_dollars(cfg, client) — bet sizing: flat, percent, edge_scaled with FV model edge tiers
+   - check_balance_safety(client, cfg) — simple check: if bankroll < bet size, skip. No circuit breakers, no min/max bankroll.
+
+   Strategy:
+   - build_strategy_key(cfg) — maps config to strategy key format (side:timing:entry_max:sell_target)
+   - check_regime_gate(regime_label, coarse, cfg) — regime gating with risk level actions, per-regime overrides, strategy-based risk
+
+   Observatory integration:
+   - poll_live_market(client, cfg) — polls Kalshi, feeds MarketObserver, computes FV model edge, updates plugin state with live_market data
+   - _update_regime_with_notify(regime_label) — regime stats update + push notifications via plugin notifications.py
+
+   Market waiting:
+   - wait_for_next_market(client, cfg, stop_event) — waits for fresh market (12+ min remaining), processes commands during wait, updates live market display. Skip first market after restart.
+
+   Trade execution:
+   - run_trade(client, cfg) — the main per-market function with 5 filter checkpoints + adaptive entry + trailing stop + early exit EV + dynamic sell. In hybrid mode, auto-strategy failures fall through to shadow.
+   - _build_trade_context(...) — centralizes all trade fields for insert
+   - _place_shadow_trade(client, ticker, side, price_c, ...) — 1-contract shadow with 60-second fill timeout
+   - _skip_wait_loop(client, cfg, close_dt, skip_trade_id, ticker, ...) — consolidated skip-wait helper. ALL paths use resolve_inline=True.
+   - _resolve_skip_inline(client, trade_id, ticker, market_id) — inline result resolution after skip
+
+   Recovery:
+   - monitor_orphan_trade(client, cfg) — orphan trade recovery on restart
+   - backfill_trade_market_results(client) — result correction, triggers recompute_all_stats when corrections made
+
+   Commands:
+   - process_commands(cfg) — reads command queue for btc_15m plugin. Handles start, stop, update_config, dismiss_summary, reset_streak.
+
+   Maintenance:
+   - _cleanup_logs(retention_days) — log rotation (bot.log file + log_entries table)
+
+   Background computation:
+   - Start a background thread for heavy work: run_simulation_batch, compute_btc_probability_surface, compute_feature_importance. Runs every 30 min (sim) and 60 min (analysis). Same pattern as old regime worker's _heavy_thread.
+
+   Main loop:
+   - run_loop(client, stop_event) — the top-level loop called by plugin.run(). Structure:
+     * Initialize MarketObserver and BtcFairValueModel
+     * Start background computation thread
+     * Main while loop: check stop_event, process commands, load config, check trading mode
+     * Observe/Shadow modes: poll_live_market, sleep, continue
+     * Active trading: run_trade, handle post-trade state
+     * Error handling: consecutive error counter (5 errors = stop auto-trading)
+     * Clean shutdown: Observatory discard, stop background thread
+
+   Key adaptations from old bot.py:
+   - ALL get_bot_state() -> get_plugin_state("btc_15m") with JSON deserialization
+   - ALL update_bot_state({...}) -> update_plugin_state("btc_15m", {...}) with JSON merge
+   - ALL clear_active_trade() -> update_plugin_state("btc_15m", {"active_trade": None})
+   - ALL get_config(k) -> get_config("btc_15m." + k) or use load_config() which strips prefix
+   - ALL set_config(k, v) -> set_config("btc_15m." + k, v)
+   - ALL get_pending_commands() -> get_pending_commands("btc_15m")
+   - ALL trade/observation DB calls -> import from plugins.btc_15m.market_db
+   - ALL notify_* calls -> import from plugins.btc_15m.notifications
+   - get_latest_regime_snapshot() -> needs to filter by asset="BTC"
+   - Regime DB functions (get_regime_risk, get_strategy_risk, etc.) -> may need to be in market_db or adapted to query btc15m_* tables
+
+   Functions to REMOVE (dead features):
+   - _save_prev_session() — sessions removed
+   - check_session_profit_target() — sessions removed
+   - check_session_loss_limit() — sessions removed
+   - check_rolling_win_rate() — circuit breakers removed
+   - check_auto_lock() — money management removed
+   - check_bankroll_limits() — money management removed (keep basic balance safety only)
+   - Legacy boolean derivation in get_trading_mode() — only trading_mode string
+   - Session stat tracking (session_pnl, session_wins, etc.) — removed
+   - Consecutive loss cooldown tracking — removed
+   - All cashing_out / cash out logic — removed
+   - Loss streak tracking and cooldown_remaining — removed
+
+2. Update plugins/btc_15m/plugin.py — replace stub run() with real delegation:
+   def run(self, stop_event):
+       from plugins.btc_15m.bot import run_loop
+       from kalshi import KalshiClient
+       from config import KALSHI_API_KEY_ID, KALSHI_PRIVATE_KEY_PATH
+       client = KalshiClient(KALSHI_API_KEY_ID, KALSHI_PRIVATE_KEY_PATH)
+       run_loop(client, stop_event)
+
+3. Verify update_plugin_state in platform db.py properly merges into state_json rather than replacing it. If it currently replaces, fix it to do a JSON merge: load existing state_json, update with new keys, write back. This is critical — multiple parts of the bot update different state fields and they can't overwrite each other.
+
+4. Check that platform db.py has get_latest_regime_snapshot(asset) function that filters by asset. If missing, add it.
+
+Verification:
+1. python3 -m py_compile plugins/btc_15m/bot.py
+2. python3 engine.py btc_15m — should:
+   - Initialize platform + plugin DB
+   - Start regime worker (candle backfill for BTC)
+   - Connect to Kalshi
+   - Enter observe mode (default trading_mode)
+   - Poll live market, feed Observatory
+   - Log "Observing — recording market data"
+3. Let it run for ~20 minutes. Check:
+   - sqlite3 /opt/trading-platform/platform.db "SELECT COUNT(*) FROM candles WHERE asset='BTC';"
+   - sqlite3 /opt/trading-platform/platform.db "SELECT * FROM regime_snapshots WHERE asset='BTC' ORDER BY captured_at DESC LIMIT 1;"
+   - sqlite3 /opt/trading-platform/platform.db "SELECT state_json FROM plugin_state WHERE plugin_id='btc_15m';" — should show status and live_market
+   - Check for btc15m_observations being written on market transitions
+4. Ctrl+C — should shut down cleanly (Observatory discards incomplete data)
+
+Critical rules:
+- Read old /opt/15-min-btc-bot/bot.py THOROUGHLY — it's ~4,870 lines and every nuance matters
+- Observatory discard on shutdown — incomplete data MUST be discarded
+- All 7 skip paths must use resolve_inline=True
+- Regime snapshots >10 min old -> force regime to "unknown"
+- Shadow trades: 60-second fill timeout, 1 contract only
+- Skip-first-market after restart — always skip the current market on startup
+- Orphan trade recovery on restart
+- Consecutive error circuit breaker (5 errors -> stop auto-trading) — this one stays, it's a safety mechanism not a trading feature
+- Fair value model: track BTC open price per market, refresh BTC price throttled, compute edge for idle display
+- Observatory fed during BOTH idle polling AND active price polling
+- Adaptive entry: starts below ask when spread >= 4c, walks up on retries
+- Trailing stop: locks in gains once price reaches configurable % of target progress
+- Early exit EV: exits losing trades when holding is negative EV with <2 min left
+- Dynamic sell: FV model adjusts sell target mid-trade when FV shifts significantly
+- python3 -m py_compile every modified file
+
+Ask if anything is unclear before starting. At the end, summarize what was built, flag any judgment calls, and check in before Phase 4.
