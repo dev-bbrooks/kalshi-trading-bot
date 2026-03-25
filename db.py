@@ -498,6 +498,15 @@ def get_logs(before_id: int = None, limit: int = 100, level: str = None,
         return rows_to_list(rows)
 
 
+def get_logs_after(after_id: int) -> list:
+    with get_conn() as c:
+        rows = c.execute("""
+            SELECT * FROM log_entries WHERE id > ?
+            ORDER BY id ASC
+        """, (after_id,)).fetchall()
+        return rows_to_list(rows)
+
+
 # ═══════════════════════════════════════════════════════════════
 #  PUSH SUBSCRIPTIONS
 # ═══════════════════════════════════════════════════════════════
