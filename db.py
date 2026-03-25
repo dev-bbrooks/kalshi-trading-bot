@@ -328,7 +328,7 @@ def get_plugin_state(plugin_id: str) -> dict:
 
 
 def update_plugin_state(plugin_id: str, data: dict):
-    """Update plugin state. 'state' key is MERGED into existing state_json, not replaced."""
+    """Update plugin state. 'state' key merges into existing state_json (not replace)."""
     with get_conn() as c:
         # Ensure row exists
         c.execute("""
@@ -340,14 +340,15 @@ def update_plugin_state(plugin_id: str, data: dict):
         values = []
         for k, v in data.items():
             if k == "state":
-                # Merge into existing state_json instead of replacing
+                # Merge into existing state_json
                 row = c.execute(
                     "SELECT state_json FROM plugin_state WHERE plugin_id = ?",
-                    (plugin_id,)).fetchone()
+                    (plugin_id,)
+                ).fetchone()
                 existing = {}
-                if row and row[0]:
+                if row and row["state_json"]:
                     try:
-                        existing = json.loads(row[0])
+                        existing = json.loads(row["state_json"])
                     except (json.JSONDecodeError, TypeError):
                         pass
                 existing.update(v)

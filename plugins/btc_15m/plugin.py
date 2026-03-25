@@ -119,25 +119,36 @@ class Btc15mPlugin(MarketPlugin):
         client = KalshiClient(KALSHI_API_KEY_ID, KALSHI_PRIVATE_KEY_PATH)
         run_loop(client, stop_event)
 
-    # Dashboard render methods — empty stubs for Phase 2, Phase 4 fills in
+    # Dashboard render methods — delegate to dashboard module
     def render_home_card_html(self) -> str:
-        return ""
+        from plugins.btc_15m.dashboard import render_home_card_html
+        return render_home_card_html()
 
     def render_trade_card_template(self) -> str:
-        return ""
+        from plugins.btc_15m.dashboard import render_trade_card_template
+        return render_trade_card_template()
 
     def render_regime_config_html(self) -> str:
-        return ""
+        from plugins.btc_15m.dashboard import render_regime_config_html
+        return render_regime_config_html()
 
     def render_stats_section_html(self) -> str:
-        return ""
+        from plugins.btc_15m.dashboard import render_stats_section_html
+        return render_stats_section_html()
 
     def render_settings_html(self) -> str:
-        return ""
+        from plugins.btc_15m.dashboard import render_settings_html
+        return render_settings_html()
 
     def render_header_html(self) -> str:
-        return ""
+        from plugins.btc_15m.dashboard import render_header_html
+        return render_header_html()
+
+    def render_js(self) -> str:
+        from plugins.btc_15m.dashboard import render_js
+        return render_js()
 
     def register_routes(self, app):
-        """Register Flask routes — stub for Phase 2. Phase 4 fills this in."""
-        pass
+        """Register Flask routes for the BTC 15m plugin."""
+        from plugins.btc_15m.dashboard import register_routes
+        register_routes(app)
