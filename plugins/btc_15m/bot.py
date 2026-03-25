@@ -1260,6 +1260,7 @@ def run_loop(client: KalshiClient, stop_event):
     # Startup backfill
     try:
         _backfill_skipped_results(client, limit=20)
+        _backfill_trade_market_results(client)
         backfill_observation_results(client, limit=30)
     except Exception as e:
         blog("WARNING", f"Startup backfill error: {e}")
@@ -2738,6 +2739,7 @@ def _run_one_market(client: KalshiClient, cfg: dict) -> bool:
     # Backfill skipped trades from this session
     try:
         _backfill_skipped_results(client, limit=10)
+        _backfill_trade_market_results(client)
     except Exception:
         pass
 
@@ -2766,6 +2768,84 @@ def _backfill_skipped_results(client: KalshiClient, limit: int = 20):
             pass
     if filled > 0:
         blog("DEBUG", f"Backfilled {filled} skipped trade results")
+    return filled
+
+
+# ═══════════════════════════════════════════════════════════════
+#  TRADE MARKET RESULT BACKFILL
+# ═══════════════════════════════════════════════════════════════
+
+def _backfill_trade_market_results(client: KalshiClient, limit: int = 20):
+    """
+    Backfill market_result for real trades (wins/losses) where it's NULL.
+    Also recalculates outcome/PnL if the trade was resolved before the result
+    was available (prevents wins from being permanently recorded as losses).
+    """
+    from db import get_conn, rows_to_list
+
+    with get_conn() as c:
+        rows = c.execute("""
+            SELECT id, ticker, market_id, side, shares_filled,
+                   sell_filled, sell_price_c, actual_cost, exit_time_utc
+            FROM btc15m_trades
+            WHERE outcome IN ('win', 'loss', 'open')
+              AND market_result IS NULL
+              AND ticker IS NOT NULL AND ticker != 'n/a'
+              AND datetime(created_at) < datetime('now', '-3 minutes')
+            ORDER BY created_at DESC LIMIT ?
+        """, (limit,)).fetchall()
+        trades = rows_to_list(rows)
+
+    if not trades:
+        return 0
+
+    filled = 0
+    corrected = 0
+    for t in trades:
+        try:
+            result = client.get_market_result(t["ticker"])
+            if result:
+                updates = {"market_result": result}
+
+                # Recalculate outcome/PnL if we have the data
+                side = t.get("side")
+                sfilled = t.get("shares_filled", 0) or 0
+                sell_filled = t.get("sell_filled", 0) or 0
+                sell_price_c = t.get("sell_price_c", 0) or 0
+                actual_cost = t.get("actual_cost", 0) or 0
+
+                if side and sfilled > 0 and actual_cost > 0:
+                    won = (result == side)
+                    gross = client.calc_gross(sfilled, sell_filled, sell_price_c, won)
+                    pnl = gross - actual_cost
+                    new_outcome = "win" if gross > actual_cost else "loss"
+                    updates["outcome"] = new_outcome
+                    updates["gross_proceeds"] = round(gross, 2)
+                    updates["pnl"] = round(pnl, 2)
+                    if not t.get("exit_time_utc"):
+                        updates["exit_time_utc"] = now_utc()
+                        updates["exit_method"] = "market_expiry"
+                    corrected += 1
+
+                update_trade(t["id"], updates)
+                if t.get("market_id"):
+                    try:
+                        update_market_outcome(t["market_id"], result)
+                    except Exception:
+                        pass
+                filled += 1
+        except Exception:
+            pass
+
+    if filled > 0:
+        blog("INFO", f"Backfilled {filled}/{len(trades)} trade market results"
+                      f"{f' ({corrected} outcomes recalculated)' if corrected else ''}")
+        if corrected > 0:
+            try:
+                recompute_all_stats()
+                blog("INFO", f"Stats recomputed after {corrected} outcome correction(s)")
+            except Exception as e:
+                blog("WARNING", f"Stats recompute after backfill failed: {e}")
     return filled
 
 
