@@ -5,6 +5,7 @@ Market discovery, bankroll sizing, state helpers.
 
 import json
 import logging
+import time
 from datetime import datetime, timezone, timedelta
 
 from config import ET, KALSHI_FEE_RATE

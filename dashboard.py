@@ -37,22 +37,20 @@ from plugins.btc_15m.market_db import (
 )
 
 def get_bot_state() -> dict:
+    """Compatibility wrapper: reads plugin_state and returns flat dict matching legacy shape."""
     ps = get_plugin_state("btc_15m")
-    state = ps.get("state", {}) if isinstance(ps.get("state"), dict) else {}
-    flat = dict(state)
-    flat["status"] = ps.get("status", "stopped")
-    flat["status_detail"] = ps.get("status_detail", "")
-    flat["last_updated"] = ps.get("last_updated", "")
-    return flat
+    if not ps:
+        return {"status": "stopped", "status_detail": "", "last_updated": ""}
+    return dict(ps)
 
 def get_regime_worker_status() -> dict:
     """Compatibility wrapper: rebuilds legacy regime status dict from platform db."""
     with get_conn() as c:
-        candle_count = c.execute("SELECT COUNT(*) as n FROM btc_candles").fetchone()["n"]
+        candle_count = c.execute("SELECT COUNT(*) as n FROM candles").fetchone()["n"]
         latest_candle = c.execute(
-            "SELECT ts FROM btc_candles ORDER BY ts DESC LIMIT 1").fetchone()
+            "SELECT ts FROM candles ORDER BY ts DESC LIMIT 1").fetchone()
         earliest_candle = c.execute(
-            "SELECT ts FROM btc_candles ORDER BY ts ASC LIMIT 1").fetchone()
+            "SELECT ts FROM candles ORDER BY ts ASC LIMIT 1").fetchone()
         snapshot_count = c.execute(
             "SELECT COUNT(*) as n FROM regime_snapshots").fetchone()["n"]
         latest_snap = get_latest_regime_snapshot("BTC")
@@ -589,12 +587,12 @@ def api_command():
 
     # Dismiss summary: clear immediately, no need to queue
     if cmd == "dismiss_summary":
-        update_plugin_state("btc_15m", {"state": {"last_completed_trade": None}})
+        update_plugin_state("btc_15m", {"last_completed_trade": None})
         return jsonify({"ok": True})
 
     # Reset streak: handle immediately
     if cmd == "reset_streak":
-        update_plugin_state("btc_15m", {"state": {"loss_streak": 0, "cooldown_remaining": 0}})
+        update_plugin_state("btc_15m", {"loss_streak": 0, "cooldown_remaining": 0})
         return jsonify({"ok": True})
 
     # Start: set state for instant UI feedback
@@ -602,20 +600,20 @@ def api_command():
         state = get_bot_state()
         at = state.get("active_trade")
         has_ignored = at and at.get("is_ignored")
-        update_plugin_state("btc_15m", {"state": {
+        update_plugin_state("btc_15m", {
             "auto_trading": 1,
             "status": "trading" if has_ignored else "searching",
             "status_detail": "Waiting for ignored trade to resolve..." if has_ignored else "Starting...",
-        }})
+        })
 
     # Stop: set state for instant UI feedback
     if cmd == "stop":
-        update_plugin_state("btc_15m", {"state": {
+        update_plugin_state("btc_15m", {
             "auto_trading": 0,
             "trades_remaining": 0,
             "loss_streak": 0,
             "status_detail": "Stopping...",
-        }})
+        })
 
     cmd_id = enqueue_command("btc_15m", cmd, params)
     return jsonify({"ok": True, "command_id": cmd_id})
@@ -940,8 +938,8 @@ def api_reset():
                 except Exception:
                     pass
             recompute_all_stats()
-            update_plugin_state("btc_15m", {"state": {"active_trade": None, "active_skip": None, "active_shadow": None,
-                              "last_completed_trade": None, "last_ticker": None}})
+            update_plugin_state("btc_15m", {"active_trade": None, "active_skip": None, "active_shadow": None,
+                              "last_completed_trade": None, "last_ticker": None})
             return jsonify({"ok": True, "scope": "trades", "msg": "All trades and observations cleared"})
 
         elif scope == "regime_filters":
@@ -955,24 +953,24 @@ def api_reset():
                 c.execute("DELETE FROM btc15m_hourly_stats")
                 c.execute("DELETE FROM regime_snapshots")
                 c.execute("DELETE FROM baselines")
-                c.execute("DELETE FROM btc_candles")
+                c.execute("DELETE FROM candles")
                 try:
                     c.execute("DELETE FROM regime_stability_log")
                 except Exception:
                     pass
-            update_plugin_state("btc_15m", {"state": {"regime_engine_phase": None}})
+            update_plugin_state("btc_15m", {"regime_engine_phase": None})
             return jsonify({"ok": True, "scope": "regime_engine", "msg": "Regime engine data wiped"})
 
         elif scope == "full":
             with get_conn() as c:
-                tables = ['trades', 'price_path', 'exit_simulations', 'regime_opportunities',
-                          'regime_stats', 'hourly_stats', 'regime_snapshots', 'baselines',
-                          'btc_candles', 'bankroll_snapshots', 'live_prices', 'markets',
-                          'push_log', 'log_entries', 'bot_commands',
-                          'confidence_factors', 'confidence_calibration', 'edge_calibration',
-                          'market_observations', 'strategy_results',
-                          'regime_stability_log', 'btc_probability_surface', 'feature_importance',
-                          'audit_log']
+                tables = ['btc15m_trades', 'btc15m_price_path', 'btc15m_exit_simulations',
+                          'btc15m_regime_opportunities', 'btc15m_regime_stats',
+                          'btc15m_hourly_stats', 'btc15m_live_prices', 'btc15m_markets',
+                          'btc15m_observations', 'btc15m_strategy_results',
+                          'btc15m_probability_surface', 'btc15m_feature_importance',
+                          'regime_snapshots', 'baselines', 'candles',
+                          'bankroll_snapshots', 'regime_stability_log',
+                          'push_log', 'log_entries', 'bot_commands', 'audit_log']
                 for t in tables:
                     try:
                         c.execute(f"DELETE FROM {t}")
@@ -984,7 +982,7 @@ def api_reset():
                 for r in rows:
                     if r["key"] not in keep:
                         c.execute("DELETE FROM bot_config WHERE key = ?", (r["key"],))
-            update_plugin_state("btc_15m", {"state": {
+            update_plugin_state("btc_15m", {
                 "status": "stopped", "status_detail": "Full reset",
                 "auto_trading": 0, "trades_remaining": 0,
                 "lifetime_pnl": 0, "lifetime_wins": 0, "lifetime_losses": 0,
@@ -1000,7 +998,7 @@ def api_reset():
                 "_delay_end_iso": None,
                 "bankroll_cents": 0,
                 "observatory_health": None,
-            }})
+            })
             return jsonify({"ok": True, "scope": "full", "msg": "Complete wipe — all data cleared"})
 
         else:
