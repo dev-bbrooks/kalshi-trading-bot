@@ -21,6 +21,19 @@ from db import (
     get_latest_regime_snapshot, get_regime_heartbeat, is_regime_worker_running,
     backup_database, insert_bankroll_snapshot, get_plugin_state,
     update_plugin_state, enqueue_command, get_pending_commands,
+    get_logs_after,
+)
+from plugins.btc_15m.market_db import (
+    get_trade, get_recent_trades, delete_trades, get_price_path,
+    get_live_prices, get_trade_summary, get_lifetime_stats,
+    get_all_regime_stats, get_regime_risk, recompute_all_stats,
+    get_skip_analysis, get_all_hourly_stats, get_regime_stability_summary,
+    get_shadow_trade_analysis, reconcile_shadow_trades, get_pnl_attribution,
+    get_observation_count, get_observatory_summary, get_net_edge_summary,
+    get_realized_edge, get_btc_surface_data, get_feature_importance,
+    get_metric_snapshot_near, get_latest_metric_snapshot,
+    get_open_trade, update_trade, get_top_strategies,
+    compute_strategy_risk_score,
 )
 
 def get_bot_state() -> dict:
@@ -31,6 +44,49 @@ def get_bot_state() -> dict:
     flat["status_detail"] = ps.get("status_detail", "")
     flat["last_updated"] = ps.get("last_updated", "")
     return flat
+
+def get_regime_worker_status() -> dict:
+    """Compatibility wrapper: rebuilds legacy regime status dict from platform db."""
+    with get_conn() as c:
+        candle_count = c.execute("SELECT COUNT(*) as n FROM btc_candles").fetchone()["n"]
+        latest_candle = c.execute(
+            "SELECT ts FROM btc_candles ORDER BY ts DESC LIMIT 1").fetchone()
+        earliest_candle = c.execute(
+            "SELECT ts FROM btc_candles ORDER BY ts ASC LIMIT 1").fetchone()
+        snapshot_count = c.execute(
+            "SELECT COUNT(*) as n FROM regime_snapshots").fetchone()["n"]
+        latest_snap = get_latest_regime_snapshot("BTC")
+        baseline_count = c.execute(
+            "SELECT COUNT(*) as n FROM baselines").fetchone()["n"]
+        regime_label_count = c.execute(
+            "SELECT COUNT(DISTINCT regime_label) as n FROM btc15m_regime_stats").fetchone()["n"]
+        recent_snaps = c.execute("""
+            SELECT captured_at FROM regime_snapshots
+            ORDER BY captured_at DESC LIMIT 10
+        """).fetchall()
+        avg_interval = None
+        if len(recent_snaps) >= 2:
+            from datetime import datetime as dt
+            times = [dt.fromisoformat(r["captured_at"].replace("Z", "+00:00"))
+                     for r in recent_snaps]
+            diffs = [(times[i] - times[i+1]).total_seconds()
+                     for i in range(len(times)-1)]
+            avg_interval = round(sum(diffs) / len(diffs))
+        state = get_bot_state()
+        phase = state.get("regime_engine_phase")
+        return {
+            "candle_count": candle_count,
+            "candles_expected": 525_600,
+            "candle_pct": round(candle_count / 525_600 * 100, 1),
+            "latest_candle_ts": latest_candle["ts"] if latest_candle else None,
+            "earliest_candle_ts": earliest_candle["ts"] if earliest_candle else None,
+            "snapshot_count": snapshot_count,
+            "latest_snapshot": latest_snap,
+            "baseline_count": baseline_count,
+            "regime_labels_tracked": regime_label_count,
+            "avg_snapshot_interval_s": avg_interval,
+            "engine_phase": phase,
+        }
 
 app = Flask(__name__)
 
@@ -1061,7 +1117,7 @@ def api_lifetime():
 def api_observatory():
     """Strategy Observatory summary — observations, top strategies, avoid list."""
     try:
-        from db import get_observatory_summary
+        # get_observatory_summary already imported from market_db
         return jsonify(get_observatory_summary())
     except Exception as e:
         return jsonify({"error": str(e)})
@@ -1158,8 +1214,7 @@ def api_strategy_regime_preview():
     if not strategy_key:
         return jsonify({"regimes": [], "error": "No strategy key"})
     try:
-        from db import (get_conn, rows_to_list, compute_strategy_risk_score,
-                        _classify_risk, _wilson_ci)
+        from plugins.btc_15m.market_db import _classify_risk, _wilson_ci
         from config import REGIME_THRESHOLDS
         min_n = REGIME_THRESHOLDS.get("min_sim_known", 10)
         regime_data = {}  # regime_label -> {sim: dict, real_*: ...}
@@ -1319,7 +1374,7 @@ def api_recompute_strategies():
 def api_net_edge():
     """Net edge per contract — the single most important metric."""
     try:
-        from db import get_net_edge_summary
+        # get_net_edge_summary already imported from market_db
         return jsonify(get_net_edge_summary())
     except Exception as e:
         return jsonify({"error": str(e)})
@@ -1331,7 +1386,7 @@ def api_realized_edge():
     """Realized edge: actual P&L per contract vs simulated EV.
     The gap between these is the execution tax."""
     try:
-        from db import get_realized_edge
+        # get_realized_edge already imported from market_db
         return jsonify(get_realized_edge())
     except Exception as e:
         return jsonify({"error": str(e)})
@@ -1355,7 +1410,7 @@ def api_hold_vs_sell():
 def api_pnl_attribution():
     """P&L attribution: model edge, execution cost, exit method, side selection."""
     try:
-        from db import get_pnl_attribution
+        # get_pnl_attribution already imported from market_db
         days = int(request.args.get("days", 30))
         return jsonify(get_pnl_attribution(days=days))
     except Exception as e:
@@ -1368,7 +1423,7 @@ def api_shadow_analysis():
     """Shadow trade analysis: sim-to-reality gap measurement.
     Shows actual fill slippage, latency, and outcome accuracy."""
     try:
-        from db import get_shadow_trade_analysis
+        # get_shadow_trade_analysis already imported from market_db
         return jsonify(get_shadow_trade_analysis())
     except Exception as e:
         return jsonify({"error": str(e)})
@@ -1381,7 +1436,7 @@ def api_shadow_reconciliation():
     to what the simulation engine predicted for the same markets.
     The systematic_gap_c is the execution integrity metric."""
     try:
-        from db import reconcile_shadow_trades
+        # reconcile_shadow_trades already imported from market_db
         return jsonify(reconcile_shadow_trades())
     except Exception as e:
         return jsonify({"error": str(e)})
@@ -1662,7 +1717,7 @@ def api_data_convergence():
     Returns per-category stability scores and an overall convergence %.
     ?hours=24 (default). Higher score = more stable = less is changing."""
     try:
-        from db import get_metric_snapshot_near, get_latest_metric_snapshot
+        # get_metric_snapshot_near, get_latest_metric_snapshot already imported from market_db
         from datetime import datetime, timezone, timedelta
         import json as _json
 
@@ -2125,7 +2180,7 @@ def api_btc_surface():
     """BTC probability surface — distance from open × time → win rate.
     Optional ?vol=calm|normal|volatile|all (default: all)."""
     try:
-        from db import get_btc_surface_data
+        # get_btc_surface_data already imported from market_db
         vol = request.args.get("vol", "all")
         if vol not in ("calm", "normal", "volatile", "all"):
             vol = "all"
@@ -2141,7 +2196,7 @@ def api_regime_stability():
     """Regime label stability metrics."""
     hours = int(request.args.get("hours", 24))
     try:
-        from db import get_regime_stability_summary
+        # get_regime_stability_summary already imported from market_db
         return jsonify(get_regime_stability_summary(hours))
     except Exception as e:
         return jsonify({"error": str(e)})
@@ -2152,7 +2207,7 @@ def api_regime_stability():
 def api_feature_importance():
     """Feature importance rankings."""
     try:
-        from db import get_feature_importance
+        # get_feature_importance already imported from market_db
         return jsonify({"features": get_feature_importance()})
     except Exception as e:
         return jsonify({"error": str(e), "features": []})
@@ -2650,7 +2705,7 @@ def api_btc_chart():
     """Return recent BTC candles for chart. Default 60 min."""
     minutes = request.args.get("minutes", 60, type=int)
     since = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
-    candles = get_btc_candles(since=since, limit=minutes + 5)
+    candles = get_candles(since=since, limit=minutes + 5)
     # Thin to just what the chart needs
     return jsonify([{"ts": c["ts"], "close": c["close"], "high": c["high"],
                      "low": c["low"], "volume": c["volume"]} for c in candles])
@@ -3239,12 +3294,7 @@ def api_export_ai_analysis():
     Returns a markdown file containing everything needed to evaluate
     and improve the bot's models, simulations, and strategy selection."""
     import time as _time
-    from db import (get_conn, rows_to_list, row_to_dict,
-                    get_observation_count, get_all_regime_stats,
-                    get_lifetime_stats,
-                    get_feature_importance, get_btc_surface_data,
-                    get_regime_stability_summary, get_all_config,
-                    get_bot_state)
+    # all functions already imported at module level from db / market_db
 
     try:
         ts = datetime.now(timezone.utc)
@@ -3719,7 +3769,7 @@ def api_export_ai_analysis():
 
         # ── 10. Shadow Trading ──
         try:
-            from db import get_shadow_trade_analysis
+            # get_shadow_trade_analysis already imported from market_db
             shadow = get_shadow_trade_analysis()
             if shadow and shadow.get("n", 0) > 0:
                 parts.append(f"\n## 10. Shadow Trading — Execution Reality Check\n")
@@ -13541,8 +13591,7 @@ fi
 
 def main():
     init_db()
-    from db import run_migration_v2_clean_slate
-    run_migration_v2_clean_slate()
+    # Migration not needed — fresh schema
     _fix_supervisor_config()
     _install_watchdog_cron()
     _start_email_deploy()
