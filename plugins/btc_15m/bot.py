@@ -1,6 +1,6 @@
 """
 bot.py — BTC 15-Minute Trading Engine (plugin).
-Regime gating, trade execution, sell target management, cash-out.
+Regime gating, trade execution, sell target management.
 """
 
 import sys
@@ -1056,148 +1056,6 @@ def wait_for_next_market(client, cfg: dict) -> dict | None:
 # ═══════════════════════════════════════════════════════════════
 #  EXECUTE CASH OUT
 # ═══════════════════════════════════════════════════════════════
-
-def execute_cash_out(client, state: dict) -> dict:
-    """Emergency exit from active trade."""
-    active = state.get("active_trade")
-    if not active:
-        return {"error": "No active trade"}
-
-    ticker = active["ticker"]
-    side = active["side"]
-    fill_count = active["fill_count"]
-    trade_id = active.get("trade_id")
-    sell_order_id = active.get("sell_order_id")
-    sell_price_c = active.get("sell_price_c") or 0
-    actual_cost = active.get("actual_cost", 0)
-
-    blog("WARNING", f"CASH OUT initiated for {ticker}")
-    _update_state({"cashing_out": 1, "cancel_cash_out": 0})
-    _update_status("trading", "CASHING OUT — selling aggressively...")
-
-    original_sell_price_c = sell_price_c
-    already_sold = 0
-    if sell_order_id:
-        existing = client.get_order(sell_order_id)
-        already_sold = existing.get("fill_count", 0)
-        client.cancel_order(sell_order_id)
-        remaining = fill_count - already_sold
-        blog("INFO", f"Cancelled sell order. Already sold: {already_sold}. Remaining: {remaining}")
-    else:
-        remaining = fill_count
-
-    if remaining <= 0:
-        blog("INFO", "All contracts already sold")
-        gross = already_sold * sell_price_c / 100
-        _update_state({"cashing_out": 0, "cancel_cash_out": 0})
-        _finalize_cash_out(client, trade_id, active, gross, fill_count, 0)
-        return {"sold": fill_count, "remaining": 0}
-
-    total_sold = already_sold
-    gross_cents = int(already_sold * sell_price_c) if already_sold else 0
-    cancelled = False
-
-    for attempt in range(10):
-        if _get_state().get("cancel_cash_out"):
-            cancelled = True
-            break
-
-        try:
-            m = client.get_market(ticker)
-            cur_bid = m.get(f"{side}_bid", 0) or 0
-        except Exception:
-            cur_bid = 1
-
-        sell_at = max(1, cur_bid - attempt)
-        _update_status(detail=f"CASHING OUT — attempt {attempt + 1}: sell@{sell_at}c")
-
-        try:
-            resp = client.place_limit_order(ticker, side, remaining, sell_at, action="sell")
-            order = resp.get("order", {})
-            oid = order.get("order_id")
-            if not oid:
-                continue
-
-            time.sleep(2)
-            check = client.get_order(oid)
-            filled = check.get("fill_count", 0)
-
-            if filled > 0:
-                fill_data = client.parse_fill(check)
-                gross_cents += fill_data.get("contract_cost_cents", 0)
-                total_sold += filled
-                remaining -= filled
-
-            if filled < remaining:
-                try:
-                    client.cancel_order(oid)
-                except Exception:
-                    pass
-
-            if remaining <= 0:
-                break
-        except Exception as e:
-            blog("WARNING", f"Cash out attempt {attempt + 1} failed: {e}")
-
-    _update_state({"cashing_out": 0, "cancel_cash_out": 0})
-
-    if cancelled and total_sold <= already_sold:
-        # Cancelled with nothing new sold — restore sell order
-        try:
-            resp = client.place_limit_order(ticker, side, remaining, original_sell_price_c, action="sell")
-            new_oid = resp.get("order", {}).get("order_id")
-            if new_oid:
-                active["sell_order_id"] = new_oid
-                _update_state({"active_trade": active})
-        except Exception:
-            pass
-        blog("INFO", "Cash out cancelled — restored sell order")
-        return {"cancelled": True, "sold": total_sold, "remaining": remaining}
-
-    gross = gross_cents / 100
-    _finalize_cash_out(client, trade_id, active, gross, total_sold, remaining)
-    return {"sold": total_sold, "remaining": remaining}
-
-
-def _finalize_cash_out(client, trade_id, active, gross, sold, remaining):
-    """Final cleanup after cash out."""
-    actual_cost = active.get("actual_cost", 0)
-    pnl = gross - actual_cost
-    regime_label = active.get("regime_label", "unknown")
-
-    if trade_id:
-        update_trade(trade_id, {
-            "outcome": "cashed_out",
-            "sell_filled": sold,
-            "gross_proceeds": round(gross, 2),
-            "pnl": round(pnl, 2),
-            "exit_time_utc": now_utc(),
-            "exit_method": "cash_out",
-        })
-
-    state = _get_state()
-    trade_won = pnl > 0
-    win_key = "lifetime_wins" if trade_won else "lifetime_losses"
-    _update_state({
-        "active_trade": None,
-        "auto_trading": 0, "trades_remaining": 0,
-        "loss_streak": 0,
-        "lifetime_pnl": (state.get("lifetime_pnl") or 0) + pnl,
-        win_key: (state.get(win_key) or 0) + 1,
-        "last_completed_trade": {
-            "trade_id": trade_id, "outcome": "cashed_out",
-            "pnl": round(pnl, 2), "side": active.get("side"),
-            "ticker": active.get("ticker"),
-        },
-    })
-    _update_status("stopped", f"Cashed out: {fpnl(pnl)}")
-
-    new_bankroll = client.get_balance_cents()
-    _update_state({"bankroll_cents": new_bankroll})
-    insert_bankroll_snapshot(new_bankroll, PLUGIN_ID, trade_id)
-
-
-# ═══════════════════════════════════════════════════════════════
 #  ORPHAN TRADE RECOVERY
 # ═══════════════════════════════════════════════════════════════
 
@@ -1353,7 +1211,7 @@ def process_commands(client, cfg: dict) -> dict:
                 state = _get_state()
 
                 _skip_first_market = True
-                base = {"auto_trading": 1, "loss_streak": 0}
+                base = {"auto_trading": 1}
 
                 if mode == "single":
                     base["trades_remaining"] = 1
@@ -1379,20 +1237,10 @@ def process_commands(client, cfg: dict) -> dict:
                         update_trade(trade_id, {"is_ignored": 1, "notes": "Stopped mid-trade — ignored"})
                 if _observer:
                     _observer.discard()
-                _update_state({"auto_trading": 0, "trades_remaining": 0, "loss_streak": 0})
+                _update_state({"auto_trading": 0, "trades_remaining": 0})
                 _update_status("stopped", "Stopped")
                 complete_command(cmd_id)
                 blog("INFO", "Stop command received")
-
-            elif cmd_type == "cash_out":
-                state = _get_state()
-                result = execute_cash_out(client, state)
-                complete_command(cmd_id, result)
-
-            elif cmd_type == "reset_streak":
-                _update_state({"loss_streak": 0, "cooldown_remaining": 0})
-                complete_command(cmd_id)
-                blog("INFO", "Loss streak reset")
 
             elif cmd_type == "update_config":
                 for k, v in params.items():
@@ -1520,36 +1368,6 @@ def run_trade(client, cfg: dict) -> bool:
         return False
 
     # ── 0. Pre-trade checks ───────────────────────────────────
-    # Cooldown after loss stop
-    cooldown = state.get("cooldown_remaining", 0)
-    if cooldown > 0:
-        blog("INFO", f"Cooldown active: skipping this market ({cooldown} remaining)")
-        market = find_current_market(client)
-        if market:
-            ticker = market["ticker"]
-            close_str = market.get("close_time", "")
-            _update_state({
-                "cooldown_remaining": cooldown - 1,
-                "last_ticker": ticker,
-            })
-            secs = client.minutes_until_close(close_str) * 60 if close_str else 30
-            if secs > 0:
-                cd_deadline = time.monotonic() + min(secs + 2, 300)
-                while time.monotonic() < cd_deadline:
-                    remaining = cd_deadline - time.monotonic()
-                    _update_status("waiting",
-                                   f"Cooling down — {cooldown} market{'s' if cooldown != 1 else ''} left — {_fmt_wait(remaining)}{_trade_ctx()}")
-                    try:
-                        poll_live_market(client, cfg)
-                    except Exception:
-                        pass
-                    time.sleep(min(2, max(0, remaining)))
-        else:
-            _update_status("waiting",
-                           f"Cooling down — {cooldown} market{'s' if cooldown != 1 else ''} left{_trade_ctx()}")
-            time.sleep(30)
-        return False
-
     # Simple balance safety check
     bankroll_c = get_effective_bankroll_cents(client, cfg)
     bet_dollars = get_r1_bet_dollars(cfg, bankroll_c / 100)
@@ -2027,7 +1845,7 @@ def run_trade(client, cfg: dict) -> bool:
             cmd_id = cmd["id"]
             if cmd_type == "stop":
                 _update_status("stopped", "Stopped",
-                               {"auto_trading": 0, "trades_remaining": 0, "loss_streak": 0})
+                               {"auto_trading": 0, "trades_remaining": 0})
                 complete_command(cmd_id)
                 blog("INFO", "Stop received during price polling")
                 stopped_early = True
@@ -2692,8 +2510,6 @@ def run_trade(client, cfg: dict) -> bool:
     osc_count = 0
     last_direction = None
     secs_to_close = (close_dt - datetime.now(timezone.utc)).total_seconds()
-    cashed_out = False
-
     if secs_to_close > 0:
         blog("INFO", f"Monitoring for {secs_to_close:.0f}s...")
         end_time = time.monotonic() + secs_to_close + 2
@@ -2708,18 +2524,8 @@ def run_trade(client, cfg: dict) -> bool:
                 cmd_id = cmd["id"]
                 params = json.loads(cmd.get("parameters") or "{}")
 
-                if cmd_type == "cash_out":
-                    blog("WARNING", "Cash out command received mid-trade")
-                    _update_state({"auto_trading": 0, "trades_remaining": 0})
-                    state_now = _get_state()
-                    result = execute_cash_out(client, state_now)
-                    complete_command(cmd_id, result)
-                    if not (result.get("cancelled") and result.get("sold", 0) == 0):
-                        cashed_out = True
-                    break
-
                 if cmd_type == "stop":
-                    _update_state({"auto_trading": 0, "trades_remaining": 0, "loss_streak": 0})
+                    _update_state({"auto_trading": 0, "trades_remaining": 0})
                     active_trade["is_ignored"] = True
                     _update_state({"active_trade": active_trade})
                     if trade_id:
@@ -2734,9 +2540,6 @@ def run_trade(client, cfg: dict) -> bool:
                     complete_command(cmd_id)
                 else:
                     pass
-
-            if cashed_out:
-                break
 
             sleep_secs = min(poll_s, end_time - time.monotonic())
             if sleep_secs > 0:
@@ -2947,10 +2750,6 @@ def run_trade(client, cfg: dict) -> bool:
                 pass
 
     # ── 11. Resolve outcome ──
-    if cashed_out:
-        blog("INFO", "Trade was cashed out — skipping outcome resolution")
-        return True
-
     sell_filled = 0
     if sell_order_id:
         sell_filled = client.get_order(sell_order_id).get("fill_count", 0)
@@ -3058,32 +2857,13 @@ def run_trade(client, cfg: dict) -> bool:
         return True
 
     if trade_won:
-        _update_state({"loss_streak": 0})
         blog("INFO", f"WIN +${pnl:.2f}")
         notify_trade_result("win", pnl, side, ticker, regime_label)
         _update_status(detail=f"WIN {fpnl(pnl)} in {regime_label}")
     else:
-        loss_streak = (state.get("loss_streak") or 0) + 1
-        max_consec = int(cfg.get("max_consecutive_losses", 5))
-        update_data = {"loss_streak": loss_streak}
-
-        if max_consec > 0 and loss_streak >= max_consec:
-            cooldown = int(cfg.get("cooldown_after_loss_stop", 0) or 0)
-            update_data.update({
-                "cooldown_remaining": cooldown,
-                "auto_trading": 0, "trades_remaining": 0,
-            })
-            blog("WARNING", f"LOSS STOP: {loss_streak} consecutive losses — stopping")
-            _update_status("stopped",
-                           f"Loss stop: {loss_streak} consecutive losses" +
-                           (f" — {cooldown} market cooldown" if cooldown else ""))
-        else:
-            streak_info = f" (streak {loss_streak})" if loss_streak > 1 else ""
-            _update_status(detail=f"LOSS {fpnl(pnl)}{streak_info}")
-            blog("INFO", f"LOSS {fpnl(pnl)} | streak={loss_streak}")
-
+        blog("INFO", f"LOSS {fpnl(pnl)}")
         notify_trade_result("loss", pnl, side, ticker, regime_label)
-        _update_state(update_data)
+        _update_status(detail=f"LOSS {fpnl(pnl)}")
 
     if regime_label:
         _update_regime_with_notify(regime_label)
@@ -3183,7 +2963,6 @@ def run_loop(client, stop_event):
     _skip_first_market = True
     _update_state({
         "active_shadow": None, "active_skip": None,
-        "cashing_out": 0, "cancel_cash_out": 0,
     })
     _update_status("stopped", "Ready")
 
