@@ -1911,8 +1911,8 @@ function switchTab(tab) {
   scrollTop();
   _adjustContentTop();
   // Tab-specific init callbacks
-  if (tab === 'Settings') { loadSvcStatus(); loadSystemStats(); loadAuditLog(); loadPinStatus(); }
-  if (tab === 'Regimes') { loadBtcChart(); loadRegimeCurrent(); }
+  if (tab === 'Settings') { loadSvcStatus(); loadSystemStats(); loadAuditLog(); loadPinStatus(); if (typeof loadConfig === 'function') loadConfig(); }
+  if (tab === 'Regimes') { loadBtcChart(); loadRegimeCurrent(); if (typeof loadRegimes === 'function') loadRegimes(); }
 }
 
 // ── Toast system (translucent backdrop-filter blur) ──
@@ -2041,13 +2041,23 @@ function openBankrollModal() { openModal('bankrollModal'); loadBankrollChart(); 
 
 async function loadBankrollChart(hours, btn) {
   if (btn) { btn.parentElement.querySelectorAll('.chip').forEach(c=>c.classList.remove('active')); btn.classList.add('active'); }
-  const url = hours ? '/api/bankroll/chart?hours='+hours : '/api/bankroll/chart';
-  const data = await api(url);
+  var url = hours ? '/api/bankroll/chart?hours='+hours : '/api/bankroll/chart';
+  var data = await api(url);
   if (!data || !data.length) return;
-  drawLineChart('bankrollChart', data.map(d=>({x:d.captured_at, y:d.bankroll_cents/100})), 'var(--blue)');
+  var mapped = data.map(function(d) {
+    var ts = new Date(d.captured_at.replace('Z','+00:00')).getTime();
+    return {x: ts, val: d.bankroll_cents / 100, ts: ts};
+  });
+  var chartOpts = {
+    refLine: true, colorByVal: false, color: '#58a6ff',
+    fmtVal: function(v) { return '$' + v.toFixed(2); },
+    xMax: Date.now()
+  };
+  if (hours) chartOpts.xMin = Date.now() - hours * 3600000;
+  drawLineChart('bankrollChart', mapped, chartOpts);
   // Update label
-  const last = data[data.length-1];
-  const label = document.getElementById('bankrollChartLabel');
+  var last = data[data.length-1];
+  var label = document.getElementById('bankrollChartLabel');
   if (label && last) label.textContent = '$' + (last.bankroll_cents/100).toFixed(2);
 }
 
@@ -2063,27 +2073,8 @@ async function lockFunds(amount) {
   }
 }
 
-// ── BTC chart ──
-async function loadBtcChart(minutes, btn) {
-  if (btn) { btn.parentElement.querySelectorAll('.chip').forEach(c=>c.classList.remove('active')); btn.classList.add('active'); }
-  minutes = minutes || 60;
-  var data = await api('/api/regime/candles?minutes='+minutes);
-  if (!data || !data.length) return;
-  drawLineChart('btcChart', data.map(function(d){return{x:d.ts, y:d.close};}), 'var(--orange)');
-  var last = data[data.length-1];
-  var el = document.getElementById('btcPriceMain');
-  if (el && last) el.textContent = '$' + last.close.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
-  // Show returns
-  if (data.length > 1) {
-    var first = data[0];
-    var ret = ((last.close - first.close) / first.close * 100).toFixed(2);
-    var retEl = document.getElementById('btcReturns');
-    if (retEl) {
-      retEl.textContent = (ret >= 0 ? '+' : '') + ret + '%';
-      retEl.style.color = ret >= 0 ? 'var(--green)' : 'var(--red)';
-    }
-  }
-}
+// ── BTC chart (stub, overridden by plugin) ──
+function loadBtcChart() {}
 
 // ── Current regime ──
 async function loadRegimeCurrent() {
@@ -2098,73 +2089,131 @@ async function loadRegimeCurrent() {
     (data.captured_ct ? '<div class="dim" style="font-size:10px;margin-top:2px">' + data.captured_ct + '</div>' : '');
 }
 
-// ── Canvas line chart utility with gradient fill ──
-function drawLineChart(canvasId, points, color) {
+// ── Canvas line chart utility with gradient fill (legacy-ported) ──
+function drawLineChart(canvasId, data, opts) {
   var canvas = document.getElementById(canvasId);
-  if (!canvas || !points.length) return;
+  if (!canvas || !data.length) return;
+  var rect = canvas.getBoundingClientRect();
+  if (rect.width < 10) {
+    canvas._pendingDraw = {data: data, opts: opts};
+    return;
+  }
   var ctx = canvas.getContext('2d');
   var dpr = window.devicePixelRatio || 1;
-  var rect = canvas.getBoundingClientRect();
   canvas.width = rect.width * dpr;
-  canvas.height = rect.height * dpr;
+  canvas.height = 120 * dpr;
   ctx.scale(dpr, dpr);
-  var w = rect.width, h = rect.height;
-  var pad = {t: 6, b: 6, l: 4, r: 4};
-  ctx.clearRect(0, 0, w, h);
-  var vals = points.map(function(p) { return p.y; });
-  var mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals);
-  var range = mx - mn || 1;
-  // Resolve CSS variable color
-  var tmp = document.createElement('span');
-  tmp.style.color = color;
-  document.body.appendChild(tmp);
-  var resolved = getComputedStyle(tmp).color;
-  document.body.removeChild(tmp);
+  var W = rect.width, H = 120;
+  var pad = {t: 10, b: 18, l: 4, r: 4};
 
-  var toX = function(i) { return pad.l + (i / Math.max(1, points.length - 1)) * (w - pad.l - pad.r); };
-  var toY = function(v) { return pad.t + (1 - (v - mn) / range) * (h - pad.t - pad.b); };
+  ctx.clearRect(0, 0, W, H);
 
-  // Grid lines
-  ctx.strokeStyle = 'rgba(48,54,61,0.4)';
-  ctx.lineWidth = 0.5;
-  for (var g = 0; g < 3; g++) {
-    var gy = pad.t + (g / 2) * (h - pad.t - pad.b);
-    ctx.beginPath(); ctx.moveTo(pad.l, gy); ctx.lineTo(w - pad.r, gy); ctx.stroke();
+  // Extend data to fill requested time range
+  var xMin = opts.xMin || data[0].x;
+  var xMax = opts.xMax || data[data.length - 1].x;
+  var plotData = data.slice();
+  if (plotData[0].x > xMin) {
+    plotData.unshift({x: xMin, val: plotData[0].val, ts: xMin});
+  }
+  if (plotData[plotData.length - 1].x < xMax) {
+    plotData.push({x: xMax, val: plotData[plotData.length - 1].val, ts: xMax});
   }
 
-  // Line
-  ctx.beginPath();
-  ctx.strokeStyle = resolved;
-  ctx.lineWidth = 1.5;
-  points.forEach(function(p, i) {
-    var x = toX(i);
-    var y = toY(p.y);
-    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-  });
-  ctx.stroke();
+  var vals = plotData.map(function(d) { return d.val; });
+  var yMin = Math.min.apply(null, vals), yMax = Math.max.apply(null, vals);
+  var yRange = yMax - yMin;
+  if (yRange < 1) { yMin -= 5; yMax += 5; }
+  else { yMin -= yRange * 0.05; yMax += yRange * 0.05; }
+  var xRange = Math.max(xMax - xMin, 1);
 
-  // Gradient fill under the line
-  var lastPt = points[points.length - 1];
-  ctx.lineTo(toX(points.length - 1), h - pad.b);
-  ctx.lineTo(toX(0), h - pad.b);
-  ctx.closePath();
-  var grad = ctx.createLinearGradient(0, pad.t, 0, h - pad.b);
-  grad.addColorStop(0, resolved.replace('rgb', 'rgba').replace(')', ',0.15)'));
-  grad.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = grad;
-  ctx.fill();
+  var toX = function(x) { return pad.l + ((x - xMin) / xRange) * (W - pad.l - pad.r); };
+  var toY = function(v) { return pad.t + (1 - (v - yMin) / (yMax - yMin)) * (H - pad.t - pad.b); };
 
-  // Current value dashed line
-  if (lastPt) {
+  // Zero line for PnL charts
+  if (opts.zeroLine && yMin < 0 && yMax > 0) {
+    ctx.strokeStyle = 'rgba(139,148,158,0.2)';
     ctx.setLineDash([3, 3]);
-    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
-    ctx.lineWidth = 1;
+    ctx.lineWidth = 0.5;
     ctx.beginPath();
-    ctx.moveTo(pad.l, toY(lastPt.y));
-    ctx.lineTo(w - pad.r, toY(lastPt.y));
+    ctx.moveTo(pad.l, toY(0));
+    ctx.lineTo(W - pad.r, toY(0));
     ctx.stroke();
     ctx.setLineDash([]);
   }
+
+  // Reference line (starting value)
+  if (opts.refLine) {
+    ctx.strokeStyle = 'rgba(88,166,255,0.2)';
+    ctx.setLineDash([3, 3]);
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(pad.l, toY(data[0].val));
+    ctx.lineTo(W - pad.r, toY(data[0].val));
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // Main line
+  var lastVal = plotData[plotData.length - 1].val;
+  var firstVal = plotData[0].val;
+  var lineColor = opts.colorByVal
+    ? (lastVal >= (opts.zeroLine ? 0 : firstVal) ? '#3fb950' : '#f85149')
+    : (opts.color || '#58a6ff');
+
+  ctx.strokeStyle = lineColor;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  for (var i = 0; i < plotData.length; i++) {
+    var x = toX(plotData[i].x), y = toY(plotData[i].val);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  // Fill
+  var lastX = toX(plotData[plotData.length - 1].x);
+  var baseY = opts.zeroLine ? toY(0) : H - pad.b;
+  ctx.lineTo(lastX, baseY);
+  ctx.lineTo(toX(plotData[0].x), baseY);
+  ctx.closePath();
+  ctx.fillStyle = lineColor === '#3fb950' ? 'rgba(63,185,80,0.06)' :
+                  lineColor === '#f85149' ? 'rgba(248,81,73,0.06)' :
+                  'rgba(88,166,255,0.06)';
+  ctx.fill();
+
+  // Current value dot
+  ctx.beginPath();
+  ctx.arc(lastX, toY(lastVal), 3, 0, Math.PI * 2);
+  ctx.fillStyle = lineColor;
+  ctx.fill();
+
+  // Y labels (min/max)
+  ctx.font = '9px monospace';
+  ctx.fillStyle = 'rgba(139,148,158,0.5)';
+  ctx.textAlign = 'right';
+  if (opts.fmtVal) {
+    ctx.fillText(opts.fmtVal(yMax), W - pad.r - 2, pad.t + 8);
+    ctx.fillText(opts.fmtVal(yMin), W - pad.r - 2, H - pad.b - 2);
+  }
+  ctx.textAlign = 'left';
+
+  // Store chart map for touch interaction
+  canvas._chartMap = {
+    data: plotData, pad: pad, W: W, H: H,
+    toX: toX, toY: toY,
+    fromX: function(cssX) { return xMin + ((cssX - pad.l) / (W - pad.l - pad.r)) * xRange; },
+    redraw: function() { drawLineChart(canvasId, data, opts); },
+    formatLabel: function(d) {
+      var dt = new Date(d.x);
+      var timeStr = dt.toLocaleString('en-US', {
+        timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit', hour12: true
+      });
+      var valStr = opts.fmtVal ? opts.fmtVal(d.val) : String(d.val);
+      var color = opts.colorByVal
+        ? (d.val >= (opts.zeroLine ? 0 : firstVal) ? 'var(--green)' : 'var(--red)')
+        : 'var(--text)';
+      return '<span style="color:' + color + '">' + valStr + '</span> \u00b7 ' + timeStr;
+    }
+  };
 }
 
 // ── System stats ──

@@ -838,6 +838,28 @@ def render_home_card_html():
 
 
 </div>
+
+<!-- Lifetime Stats Grid -->
+<div style="padding:0 16px">
+  <div class="stat-grid">
+    <div class="stat"><div class="label">Wins</div><div class="val pos" id="statWins">0</div></div>
+    <div class="stat"><div class="label">Losses</div><div class="val neg" id="statLosses">0</div></div>
+    <div class="stat"><div class="label">Win Rate</div><div class="val" id="statWinRate">&mdash;</div></div>
+    <div class="stat"><div class="label">P&amp;L</div><div class="val" id="statPnl">$0</div></div>
+  </div>
+</div>
+
+<!-- Observatory Health -->
+<div id="obsHealthCard" style="display:none;padding:0 16px;margin-top:8px">
+  <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px 12px;display:flex;justify-content:space-between;align-items:center">
+    <div>
+      <span class="dim" style="font-size:10px;font-weight:600;letter-spacing:.3px">OBSERVATORY</span>
+      <span id="obsCountVal" style="font-size:13px;font-weight:600;margin-left:6px">0</span>
+      <span class="dim" style="font-size:11px"> markets recorded</span>
+    </div>
+    <span id="obsCaptureRate" class="dim" style="font-size:11px"></span>
+  </div>
+</div>
 """
 
 
@@ -1631,6 +1653,7 @@ function renderUI(s) {
 
     } else if (live) {
       // Monitor mode
+      lastStateData._liveMarket = live;
       if (trade) trade.style.display = 'none';
       if (pend) pend.style.display = 'none';
       if (mon) {
@@ -1693,8 +1716,15 @@ function renderUI(s) {
             const slip = (activeShadow.fill_price_c || 0) - (activeShadow.decision_price_c || 0);
             shSlip.textContent = (slip >= 0 ? '+' : '') + slip + '\u00a2';
           }
+          // Update sim state for chart overlay
+          _sim.active = true;
+          _sim.side = activeShadow.side || null;
+          _sim.entry = activeShadow.fill_price_c || 0;
+          _sim.sellTarget = activeShadow.sell_target_c || 0;
+          _sim.sold = !!activeShadow.sold;
         } else if (shadowSec) {
           shadowSec.style.display = 'none';
+          _sim.active = false;
         }
         // Auto strategy info
         const autoStrat = document.getElementById('monAutoStrategy');
@@ -1735,6 +1765,23 @@ function renderUI(s) {
       if (trade) trade.style.display = 'none';
       if (pend) pend.style.display = 'none';
     }
+
+    // Lifetime stats grid
+    var lw = state.lifetime_wins || 0;
+    var ll = state.lifetime_losses || 0;
+    var wr = (lw + ll) > 0 ? (lw / (lw + ll) * 100).toFixed(1) : '\u2014';
+    document.getElementById('statWins').textContent = lw;
+    document.getElementById('statLosses').textContent = ll;
+    document.getElementById('statWinRate').textContent = wr === '\u2014' ? wr : wr + '%';
+    var lpnl = state.lifetime_pnl || 0;
+    var pnlEl = document.getElementById('statPnl');
+    pnlEl.textContent = fmtPnl(lpnl);
+    pnlEl.className = 'val ' + (lpnl >= 0 ? 'pos' : 'neg');
+
+    // Observatory health - show from state or fetch separately
+    _updateObsHealth(state.observatory_health);
+
+    _autoFitStatVals();
 
     // Adjust content top for dynamic header height
     if (typeof _adjustContentTop === 'function') _adjustContentTop();
@@ -2447,6 +2494,8 @@ function _statsExportCsv() {
 }
 
 // ── Live Chart Drawing ──
+var _sim = {active: false, side: null, entry: 0, sellTarget: 0, sold: false};
+
 function drawLiveMarketChart(canvasId) {
   var buf = _livePriceBuf;
   var canvas = document.getElementById(canvasId);
@@ -2472,6 +2521,27 @@ function drawLiveMarketChart(canvasId) {
 
   var yMin = Math.min.apply(null, bids) - 2;
   var yMax = Math.max.apply(null, bids) + 2;
+
+  // Expand Y range to include sim trade lines if active
+  if (_sim.active && _sim.side && _sim.entry > 0) {
+    yMin = Math.min(yMin, _sim.entry - 2);
+    yMax = Math.max(yMax, _sim.entry + 2);
+    if (_sim.sellTarget > 0) {
+      yMin = Math.min(yMin, _sim.sellTarget - 2);
+      yMax = Math.max(yMax, _sim.sellTarget + 2);
+    }
+  }
+
+  // Expand Y range to include fair value line
+  if (canvasId === 'liveChart' && lastStateData._liveMarket) {
+    var _fvLm = lastStateData._liveMarket.fv_model;
+    if (_fvLm && _fvLm.fair_yes_c != null) {
+      var _fvC = Math.min(_fvLm.fair_yes_c, _fvLm.fair_no_c);
+      yMin = Math.min(yMin, _fvC - 2);
+      yMax = Math.max(yMax, _fvC + 2);
+    }
+  }
+
   if (yMax - yMin < 6) { yMin -= 3; yMax += 3; }
 
   // Time range: use full 15-min market window if close time available
@@ -2484,79 +2554,142 @@ function drawLiveMarketChart(canvasId) {
   var toX = function(ms) { return pad.l + ((ms - startMs) / totalMs) * (W - pad.l - pad.r); };
   var toY = function(v) { return pad.t + (1 - (v - yMin) / (yMax - yMin)) * (H - pad.t - pad.b); };
 
-  ctx.clearRect(0, 0, W, H);
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
 
-  // Time gridlines
-  ctx.strokeStyle = 'rgba(48,54,61,0.5)';
-  ctx.setLineDash([2, 3]);
-  ctx.lineWidth = 0.5;
-  ctx.font = '9px sans-serif';
-  ctx.fillStyle = 'rgba(139,148,158,0.4)';
-  var spanMin = totalMs / 60000;
-  var step = spanMin > 10 ? 5 : spanMin > 4 ? 2 : 1;
-  for (var m = step; m < spanMin; m += step) {
-    var gx = toX(startMs + m * 60000);
-    if (gx > pad.l + 10 && gx < W - pad.r - 10) {
-      ctx.beginPath(); ctx.moveTo(gx, pad.t); ctx.lineTo(gx, H - pad.b); ctx.stroke();
-      ctx.fillText(m + 'm', gx - 6, H - 3);
+    // Time gridlines
+    ctx.strokeStyle = 'rgba(48,54,61,0.5)';
+    ctx.setLineDash([2, 3]);
+    ctx.lineWidth = 0.5;
+    ctx.font = '9px sans-serif';
+    ctx.fillStyle = 'rgba(139,148,158,0.4)';
+    var spanMin = totalMs / 60000;
+    var step = spanMin > 10 ? 5 : spanMin > 4 ? 2 : 1;
+    for (var m = step; m < spanMin; m += step) {
+      var gx = toX(startMs + m * 60000);
+      if (gx > pad.l + 10 && gx < W - pad.r - 10) {
+        ctx.beginPath(); ctx.moveTo(gx, pad.t); ctx.lineTo(gx, H - pad.b); ctx.stroke();
+        ctx.fillText(m + 'm', gx - 6, H - 3);
+      }
+    }
+    ctx.setLineDash([]);
+
+    // "Now" marker
+    var nowMs = Date.now();
+    if (nowMs > startMs && nowMs < endMs) {
+      var nx = toX(nowMs);
+      ctx.strokeStyle = 'rgba(139,148,158,0.15)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(nx, pad.t); ctx.lineTo(nx, H - pad.b); ctx.stroke();
+    }
+
+    // 25c grid lines
+    for (var g = 0; g <= 100; g += 25) {
+      if (g > yMin && g < yMax) {
+        ctx.strokeStyle = 'rgba(48,54,61,0.3)';
+        ctx.lineWidth = 0.5;
+        ctx.beginPath(); ctx.moveTo(pad.l, toY(g)); ctx.lineTo(W - pad.r, toY(g)); ctx.stroke();
+        ctx.fillStyle = 'rgba(139,148,158,0.3)';
+        ctx.font = '8px monospace';
+        ctx.fillText(g + '', 2, toY(g) + 3);
+      }
+    }
+
+    // Price line (cheaper side)
+    var lastBid = bids[bids.length - 1];
+    var firstBid = bids[0];
+    var lineColor = lastBid >= firstBid ? '#3fb950' : '#f85149';
+
+    ctx.strokeStyle = lineColor;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (var i = 0; i < data.length; i++) {
+      var x = toX(data[i].ts);
+      var y = toY(bids[i]);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    // Fill under
+    var lastX = toX(data[data.length - 1].ts);
+    var lastY = toY(lastBid);
+    ctx.lineTo(lastX, H - pad.b);
+    ctx.lineTo(toX(data[0].ts), H - pad.b);
+    ctx.closePath();
+    ctx.fillStyle = lastBid >= firstBid ? 'rgba(63,185,80,0.06)' : 'rgba(248,81,73,0.06)';
+    ctx.fill();
+
+    // Sim trade reference lines (entry + sell target)
+    if (_sim.active && _sim.side && _sim.entry > 0 && canvasId === 'liveChart') {
+      // Entry line - dashed yellow
+      var entryY = toY(_sim.entry);
+      ctx.strokeStyle = 'rgba(210,153,34,0.6)';
+      ctx.setLineDash([4, 3]);
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(pad.l, entryY); ctx.lineTo(W - pad.r, entryY); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.font = '9px monospace';
+      ctx.fillStyle = 'rgba(210,153,34,0.8)';
+      ctx.fillText('sim ' + _sim.entry + '\u00a2', pad.l + 2, entryY - 3);
+
+      // Sell target line - dashed green (if not hold-to-expiry)
+      if (_sim.sellTarget > 0) {
+        var sellY = toY(_sim.sellTarget);
+        ctx.strokeStyle = _sim.sold ? 'rgba(63,185,80,0.8)' : 'rgba(63,185,80,0.5)';
+        ctx.setLineDash([4, 3]);
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(pad.l, sellY); ctx.lineTo(W - pad.r, sellY); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = _sim.sold ? 'rgba(63,185,80,0.9)' : 'rgba(63,185,80,0.7)';
+        ctx.fillText((_sim.sold ? '\u2713 ' : '') + _sim.sellTarget + '\u00a2', pad.l + 2, sellY - 3);
+      }
+    }
+
+    // Current price dot + label
+    ctx.beginPath();
+    ctx.arc(lastX, lastY, 3, 0, Math.PI * 2);
+    ctx.fillStyle = lineColor;
+    ctx.fill();
+    ctx.font = '10px monospace';
+    ctx.fillStyle = lineColor;
+    var labelX = lastX > W - 40 ? lastX - 30 : lastX + 5;
+    ctx.fillText(lastBid + '\u00a2', labelX, lastY - 6);
+
+    // Fair Value Model reference lines (purple dashed)
+    if (canvasId === 'liveChart' && lastStateData._liveMarket) {
+      var fv = lastStateData._liveMarket.fv_model;
+      if (fv && fv.fair_yes_c != null) {
+        var fvCheaper = Math.min(fv.fair_yes_c, fv.fair_no_c);
+        if (fvCheaper > yMin && fvCheaper < yMax) {
+          var fvY = toY(fvCheaper);
+          ctx.strokeStyle = 'rgba(136,132,216,0.5)';
+          ctx.setLineDash([3, 4]);
+          ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(pad.l, fvY); ctx.lineTo(W - pad.r, fvY); ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.font = '9px monospace';
+          ctx.fillStyle = 'rgba(136,132,216,0.8)';
+          ctx.fillText('FV ' + Math.round(fvCheaper) + '\u00a2', W - pad.r - 40, fvY - 3);
+        }
+      }
     }
   }
-  ctx.setLineDash([]);
+  draw();
 
-  // "Now" marker
-  var nowMs = Date.now();
-  if (nowMs > startMs && nowMs < endMs) {
-    var nx = toX(nowMs);
-    ctx.strokeStyle = 'rgba(139,148,158,0.15)';
-    ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(nx, pad.t); ctx.lineTo(nx, H - pad.b); ctx.stroke();
-  }
-
-  // 25c grid lines
-  for (var g = 0; g <= 100; g += 25) {
-    if (g > yMin && g < yMax) {
-      ctx.strokeStyle = 'rgba(48,54,61,0.3)';
-      ctx.lineWidth = 0.5;
-      ctx.beginPath(); ctx.moveTo(pad.l, toY(g)); ctx.lineTo(W - pad.r, toY(g)); ctx.stroke();
-      ctx.fillStyle = 'rgba(139,148,158,0.3)';
-      ctx.font = '8px monospace';
-      ctx.fillText(g + '', 2, toY(g) + 3);
+  // Touch crosshair support
+  canvas._chartMap = {
+    data: data.map(function(d, i) { return {ts: d.ts, x: d.ts, bid: bids[i], val: bids[i]}; }),
+    pad: pad, W: W, H: H,
+    toX: toX, toY: toY,
+    fromX: function(cssX) { return startMs + ((cssX - pad.l) / (W - pad.l - pad.r)) * totalMs; },
+    redraw: draw,
+    formatLabel: function(d) {
+      var secs = Math.round((d.ts - startMs) / 1000);
+      var mins = Math.floor(secs / 60);
+      var secsR = secs % 60;
+      return '<span style="color:var(--text)">' + Math.round(d.val) + '\u00a2</span> \u00b7 ' + mins + ':' + String(secsR).padStart(2,'0');
     }
-  }
-
-  // Price line (cheaper side)
-  var lastBid = bids[bids.length - 1];
-  var firstBid = bids[0];
-  var lineColor = lastBid >= firstBid ? '#3fb950' : '#f85149';
-
-  ctx.strokeStyle = lineColor;
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  for (var i = 0; i < data.length; i++) {
-    var x = toX(data[i].ts);
-    var y = toY(bids[i]);
-    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-  }
-  ctx.stroke();
-
-  // Fill under
-  var lastX = toX(data[data.length - 1].ts);
-  var lastY = toY(lastBid);
-  ctx.lineTo(lastX, H - pad.b);
-  ctx.lineTo(toX(data[0].ts), H - pad.b);
-  ctx.closePath();
-  ctx.fillStyle = lastBid >= firstBid ? 'rgba(63,185,80,0.06)' : 'rgba(248,81,73,0.06)';
-  ctx.fill();
-
-  // Current price dot + label
-  ctx.beginPath();
-  ctx.arc(lastX, lastY, 3, 0, Math.PI * 2);
-  ctx.fillStyle = lineColor;
-  ctx.fill();
-  ctx.font = '10px monospace';
-  ctx.fillStyle = lineColor;
-  var labelX = lastX > W - 40 ? lastX - 30 : lastX + 5;
-  ctx.fillText(lastBid + '\u00a2', labelX, lastY - 6);
+  };
 
   // Time label
   if (buf.closeTime) {
@@ -2957,6 +3090,34 @@ async function shareFile(url, fname) {
 
 // ── Foreground refresh ──
 var _lastForegroundRefresh = 0;
+// ── Observatory health ──
+var _obsHealthLoaded = false;
+function _updateObsHealth(oh) {
+  var obsCard = document.getElementById('obsHealthCard');
+  if (!obsCard) return;
+  if (oh && oh.total != null) {
+    obsCard.style.display = '';
+    document.getElementById('obsCountVal').textContent = oh.total || 0;
+    var rateEl = document.getElementById('obsCaptureRate');
+    if (rateEl) {
+      var resolved = oh.resolved || 0;
+      rateEl.textContent = resolved + ' resolved';
+    }
+    _obsHealthLoaded = true;
+  } else if (!_obsHealthLoaded) {
+    // Fetch from API if not in state
+    _obsHealthLoaded = true; // prevent re-fetching on every poll
+    api('/api/btc_15m/observation_count').then(function(data) {
+      if (data && data.total != null) {
+        obsCard.style.display = '';
+        document.getElementById('obsCountVal').textContent = data.total || 0;
+        var rateEl = document.getElementById('obsCaptureRate');
+        if (rateEl) rateEl.textContent = (data.resolved || 0) + ' resolved';
+      }
+    }).catch(function() {});
+  }
+}
+
 async function _refreshOnForeground() {
   var now = Date.now();
   if (now - _lastForegroundRefresh < 2000) return;
@@ -3004,6 +3165,8 @@ window.simShuffle = simShuffle;
 window.resetTradeCache = resetTradeCache;
 window.showPushLog = showPushLog;
 window.shareFile = shareFile;
+window.loadConfig = loadConfig;
+window.loadRegimes = loadRegimes;
 window.initPush = initPush;
 window.togglePush = togglePush;
 window._syncModeStrip = _syncModeStrip;
