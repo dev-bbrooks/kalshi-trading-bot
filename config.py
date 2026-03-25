@@ -1,11 +1,9 @@
 """
-config.py — Platform constants, paths, and credentials.
-Market-agnostic. No DEFAULT_BOT_CONFIG — plugins own their own config.
+config.py — Constants, paths, and credentials for the trading platform.
 """
 
 import os
 from zoneinfo import ZoneInfo
-
 
 # ── Load .env file (no dependencies needed) ───────────────────
 def _load_env_file():
@@ -50,16 +48,18 @@ KALSHI_FEE_RATE = 0.07  # 7% of contract price per contract (buys only)
 BINANCE_BASE_URL = "https://api.binance.us"
 
 # ── Dashboard ──────────────────────────────────────────────────
-DASHBOARD_HOST = "0.0.0.0"
+DASHBOARD_HOST = os.environ.get("DASHBOARD_HOST", "0.0.0.0")
 DASHBOARD_PORT = int(os.environ.get("DASHBOARD_PORT", 8050))
 DASHBOARD_USER = os.environ.get("DASHBOARD_USER", "admin")
 DASHBOARD_PASS = os.environ.get("DASHBOARD_PASS", "CHANGE_ME")
 
 # ── Regime Risk Thresholds ────────────────────────────────────
 REGIME_THRESHOLDS = {
-    "min_trades_known":   10,
-    "min_sim_known":      10,
-    "low_risk_floor":     65,
-    "moderate_risk_floor": 45,
-    "high_risk_floor":    25,
+    "min_trades_known":   10,    # Below this = "unknown" (real trades)
+    "min_sim_known":      10,    # Below this = "unknown" (Observatory sims)
+    # Composite risk score thresholds (0-100, higher = safer)
+    "low_risk_floor":     65,    # Score >= 65 = low risk
+    "moderate_risk_floor": 45,   # Score >= 45 = moderate
+    "high_risk_floor":    25,    # Score >= 25 = high risk
+    # Below 25 = terrible (extreme)
 }

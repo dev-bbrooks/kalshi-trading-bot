@@ -1,7 +1,6 @@
 """
-push.py — Web Push notification delivery infrastructure.
-Market-agnostic. Only handles sending — no notify_* convenience functions.
-Plugins implement their own notification logic in notifications.py.
+push.py — Web Push notification infrastructure.
+Sends real-time alerts to subscribed browsers.
 """
 
 import json
@@ -44,6 +43,7 @@ def send_push(subscription_info: dict, title: str, body: str,
               tag: str = "trade", url: str = "/", silent: bool = False) -> bool | None:
     """
     Send a push notification to a single subscription.
+    silent=True sends with no sound/vibration (low priority popup only).
     Returns True if sent, False if subscription is dead (404/410),
     None on temporary/config failure (don't remove subscription).
     """
@@ -69,13 +69,14 @@ def send_push(subscription_info: dict, title: str, body: str,
             data=payload,
             vapid_private_key=cfg["private_key_path"],
             vapid_claims={"sub": cfg.get("admin_email", "mailto:admin@bbrooks.dev")},
-            ttl=300,
+            ttl=300,  # 5 min expiry
         )
         return True
 
     except WebPushException as e:
         status = getattr(e, "response", None)
         if status and status.status_code in (404, 410):
+            # Subscription expired/invalid — caller should remove it
             log.info(f"Push subscription expired (HTTP {status.status_code}): {e}")
             return False
         log.warning(f"Push temporary error: {e}")
@@ -90,6 +91,7 @@ def send_to_all(title: str, body: str, tag: str = "trade", url: str = "/",
     """
     Send push notification to all stored subscriptions.
     Removes dead subscriptions automatically.
+    silent=True sends with no sound/vibration.
     """
     if not PUSH_AVAILABLE:
         return
@@ -108,6 +110,7 @@ def send_to_all(title: str, body: str, tag: str = "trade", url: str = "/",
             if result is True:
                 sent = True
             elif result is False:
+                # Only remove on confirmed expired (404/410)
                 remove_push_subscription(sub["id"])
                 log.info(f"Removed expired push subscription {sub['id']}")
             elif result is None:

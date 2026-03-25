@@ -1,111 +1,92 @@
 """
-engine.py — Universal plugin launcher.
+engine.py — Plugin runner for the trading platform.
+
 Usage: python3 engine.py btc_15m
-Loads the specified plugin, initializes DB, starts regime worker, runs plugin.
 """
 
-import sys
-import signal
-import logging
 import importlib
-from threading import Event, Thread
+import inspect
+import logging
+import signal
+import sys
+import threading
 
-from config import PLATFORM_DIR, LOG_FILE
-from db import init_db, update_plugin_state, insert_log
-from regime import regime_worker
+from config import LOG_FILE
+from db import init_db, update_plugin_state, now_utc
+from plugin_base import MarketPlugin
 
-
-# ── Logging ────────────────────────────────────────────────────
 
 def setup_logging(plugin_id: str):
-    fmt = f"%(asctime)s [{plugin_id}] %(name)s %(levelname)s: %(message)s"
-    logging.basicConfig(
-        level=logging.INFO,
-        format=fmt,
-        handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler(LOG_FILE, mode="a"),
-        ],
-    )
+    """Configure console + file logging."""
+    fmt = f"[%(asctime)s] [{plugin_id}] %(levelname)s %(message)s"
+    datefmt = "%Y-%m-%d %H:%M:%S"
+
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+
+    # Console
+    console = logging.StreamHandler(sys.stdout)
+    console.setFormatter(logging.Formatter(fmt, datefmt=datefmt))
+    root.addHandler(console)
+
+    # File
+    file_handler = logging.FileHandler(LOG_FILE)
+    file_handler.setFormatter(logging.Formatter(fmt, datefmt=datefmt))
+    root.addHandler(file_handler)
 
 
-# ── Plugin Discovery ──────────────────────────────────────────
-
-def load_plugin(plugin_id: str):
-    """
-    Load a plugin by ID. Expects plugins/{plugin_id}/plugin.py with a
-    class that subclasses MarketPlugin. Returns an instance.
-    """
+def load_plugin(plugin_id: str) -> MarketPlugin:
+    """Import plugins.{plugin_id}.plugin and return the MarketPlugin subclass instance."""
     module_path = f"plugins.{plugin_id}.plugin"
-    try:
-        mod = importlib.import_module(module_path)
-    except ModuleNotFoundError as e:
-        print(f"Error: Could not find plugin '{plugin_id}' at {module_path}: {e}")
-        sys.exit(1)
+    mod = importlib.import_module(module_path)
 
-    # Find the MarketPlugin subclass
-    from plugin_base import MarketPlugin
-    plugin_cls = None
-    for attr_name in dir(mod):
-        attr = getattr(mod, attr_name)
-        if (isinstance(attr, type) and issubclass(attr, MarketPlugin)
-                and attr is not MarketPlugin):
-            plugin_cls = attr
-            break
+    # Find the MarketPlugin subclass in the module
+    for _, obj in inspect.getmembers(mod, inspect.isclass):
+        if issubclass(obj, MarketPlugin) and obj is not MarketPlugin:
+            return obj()
 
-    if plugin_cls is None:
-        print(f"Error: No MarketPlugin subclass found in {module_path}")
-        sys.exit(1)
+    raise RuntimeError(f"No MarketPlugin subclass found in {module_path}")
 
-    return plugin_cls()
-
-
-# ── Main ───────────────────────────────────────────────────────
 
 def main():
     if len(sys.argv) < 2:
         print("Usage: python3 engine.py <plugin_id>")
-        print("Example: python3 engine.py btc_15m")
         sys.exit(1)
 
     plugin_id = sys.argv[1]
     setup_logging(plugin_id)
-    log = logging.getLogger("engine")
+    log = logging.getLogger(__name__)
 
-    log.info(f"Starting engine for plugin: {plugin_id}")
-
-    # Initialize platform DB
+    # Initialize platform database
     init_db()
-    log.info("Platform DB initialized")
 
-    # Load plugin
+    # Load and initialize plugin
+    log.info(f"Loading plugin: {plugin_id}")
     plugin = load_plugin(plugin_id)
-    log.info(f"Loaded plugin: {plugin.display_name} (asset={plugin.asset})")
-
-    # Initialize plugin DB tables
     plugin.init_db()
-    log.info("Plugin DB tables initialized")
 
     # Set initial state
     update_plugin_state(plugin_id, {
         "status": "starting",
-        "status_detail": "Initializing regime engine...",
+        "status_detail": "initializing",
     })
 
-    # Stop event for clean shutdown
-    stop_event = Event()
+    # Stop event for graceful shutdown
+    stop_event = threading.Event()
 
     def handle_signal(signum, frame):
-        log.info(f"Received signal {signum}, shutting down...")
+        sig_name = signal.Signals(signum).name
+        log.info(f"Received {sig_name}, shutting down...")
         stop_event.set()
 
     signal.signal(signal.SIGTERM, handle_signal)
     signal.signal(signal.SIGINT, handle_signal)
 
-    # Start regime worker in background thread
-    regime_thread = Thread(
+    # Start regime worker in daemon thread
+    from regime import regime_worker
+    regime_thread = threading.Thread(
         target=regime_worker,
-        args=(plugin.asset, stop_event, plugin_id),
+        args=(plugin.asset, stop_event),
         daemon=True,
         name=f"regime-{plugin.asset}",
     )
@@ -114,23 +95,17 @@ def main():
 
     # Run plugin (blocks until stop_event)
     try:
-        insert_log("INFO", f"Engine started: {plugin.display_name}", plugin_id)
         plugin.run(stop_event)
-    except Exception as e:
-        log.error(f"Plugin crashed: {e}", exc_info=True)
-        insert_log("ERROR", f"Plugin crashed: {e}", plugin_id)
+    except Exception:
+        log.exception("Plugin crashed")
     finally:
         stop_event.set()
         update_plugin_state(plugin_id, {
             "status": "stopped",
-            "status_detail": "Engine shut down",
+            "status_detail": "",
         })
-        insert_log("INFO", f"Engine stopped: {plugin.display_name}", plugin_id)
         log.info("Engine stopped")
 
 
 if __name__ == "__main__":
-    # Ensure platform dir is on path for imports
-    if PLATFORM_DIR not in sys.path:
-        sys.path.insert(0, PLATFORM_DIR)
     main()
