@@ -2036,7 +2036,18 @@ def _run_one_market(client: KalshiClient, cfg: dict) -> bool:
     if est_cost > bankroll_c / 100:
         reason = f"Insufficient bankroll: need ~${est_cost:.2f}"
         blog("WARNING", reason)
-        _update_state({"auto_trading": 0, "status": "stopped", "status_detail": reason})
+        skip_id = insert_trade({**_ctx, "market_id": market_id, "regime_snapshot_id": snapshot_id,
+                               "ticker": ticker, "side": side, "outcome": "skipped",
+                               "skip_reason": reason, "bet_size_dollars": bet_dollars})
+        if _observer:
+            _observer.mark_action("observed", skip_id, market_id=market_id,
+                                  strategy_key=_active_strategy_key, regime_label=regime_label)
+        secs = (close_dt - datetime.now(timezone.utc)).total_seconds()
+        _update_state({"status": "waiting",
+                      "status_detail": f"Observing — {reason}{_trade_ctx()}"})
+        _skip_wait_loop(client, cfg, close_dt, skip_id, ticker,
+                        regime_label, gate.get("risk_level", "unknown"), reason,
+                        resolve_inline=True, market_id=market_id)
         return False
 
     stability_c = (max(poll_prices_seen) - min(poll_prices_seen)) if len(poll_prices_seen) >= 2 else None
@@ -2137,7 +2148,55 @@ def _run_one_market(client: KalshiClient, cfg: dict) -> bool:
                 if new_price >= min_entry_c and new_price <= max_entry_c:
                     buy_price_c = new_price
                 else:
-                    break
+                    # Current side out of range — check the other side
+                    _other = "no" if side == "yes" else "yes"
+                    _other_price = m.get(f"{_other}_ask", 0) or 0
+                    if _other_price >= min_entry_c and _other_price <= max_entry_c:
+                        side = _other
+                        buy_price_c = _other_price
+                        blog("INFO", f"Switched to {side.upper()} @ {buy_price_c}c")
+                    else:
+                        # Neither side in range — wait and re-poll until
+                        # something comes back or fill deadline expires
+                        blog("INFO", f"Both sides outside {min_entry_c}-{max_entry_c}c — "
+                                      f"waiting for price to return")
+                        _update_state({"status_detail": f"Waiting for price — "
+                                       f"both sides out of range{_trade_ctx()}"})
+                        _found_reentry = False
+                        while time.time() < fill_deadline:
+                            time.sleep(poll_interval)
+                            try:
+                                _rm = client.get_market(ticker)
+                                # Feed observatory during wait
+                                if _observer:
+                                    _obs_d = {
+                                        "yes_ask": _rm.get("yes_ask"),
+                                        "no_ask": _rm.get("no_ask"),
+                                        "yes_bid": _rm.get("yes_bid"),
+                                        "no_bid": _rm.get("no_bid"),
+                                        "btc_price": snapshot.get("btc_price") if snapshot else None,
+                                        "volume": _rm.get("volume"),
+                                        "open_interest": _rm.get("open_interest"),
+                                    }
+                                    _observer.tick(ticker, close_str, _obs_d, snapshot,
+                                                   _strategy_risk)
+                                for _cs in ("yes", "no"):
+                                    _cp = _rm.get(f"{_cs}_ask", 0) or 0
+                                    if _cp >= min_entry_c and _cp <= max_entry_c:
+                                        side = _cs
+                                        buy_price_c = _cp
+                                        blog("INFO", f"Price returned — "
+                                                      f"{side.upper()} @ {buy_price_c}c")
+                                        _found_reentry = True
+                                        break
+                                if _found_reentry:
+                                    break
+                            except Exception:
+                                continue
+                        if not _found_reentry:
+                            blog("INFO", "Price never returned to range — "
+                                          "giving up on fill")
+                            break
             except Exception:
                 break
             time.sleep(1)
