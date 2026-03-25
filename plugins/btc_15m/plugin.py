@@ -112,10 +112,12 @@ class Btc15mPlugin(MarketPlugin):
         }
 
     def run(self, stop_event):
-        """Main trading loop — stub for Phase 2. Phase 3 fills this in."""
-        log.info(f"[{self.plugin_id}] Plugin running (Phase 2 stub)")
-        stop_event.wait()
-        log.info(f"[{self.plugin_id}] Plugin stopped")
+        """Main trading loop — delegates to bot.run_loop()."""
+        from plugins.btc_15m.bot import run_loop
+        from kalshi import KalshiClient
+        from config import KALSHI_API_KEY_ID, KALSHI_PRIVATE_KEY_PATH
+        client = KalshiClient(KALSHI_API_KEY_ID, KALSHI_PRIVATE_KEY_PATH)
+        run_loop(client, stop_event)
 
     # Dashboard render methods — empty stubs for Phase 2, Phase 4 fills in
     def render_home_card_html(self) -> str:

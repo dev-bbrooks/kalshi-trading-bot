@@ -16,3 +16,5 @@ _backup/
 _reports/
 venv/
 btcbotapp.conf
+.claude/settings.local.json
+.claude/worktrees/
