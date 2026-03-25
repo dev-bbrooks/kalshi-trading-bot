@@ -1996,7 +1996,11 @@ def _run_one_market(client: KalshiClient, cfg: dict) -> bool:
         reason = f"{side.upper()} side blocked for {regime_label}"
         blog("INFO", f"Regime filter: {reason}")
         skip_id = insert_trade({**_ctx, "market_id": market_id, "regime_snapshot_id": snapshot_id,
-                               "ticker": ticker, "side": side, "outcome": "skipped", "skip_reason": reason})
+                               "ticker": ticker, "side": side, "outcome": "skipped", "skip_reason": reason,
+                               "yes_ask_at_entry": polled_ya, "no_ask_at_entry": polled_na,
+                               "yes_bid_at_entry": polled_yb, "no_bid_at_entry": polled_nb,
+                               "spread_at_entry_c": spread_at_entry_c,
+                               "num_price_samples": len(poll_prices_seen) if poll_prices_seen else 0})
         _skip_wait_loop(client, cfg, close_dt, skip_id, ticker,
                         regime_label, gate.get("risk_level", "unknown"), reason,
                         resolve_inline=True, market_id=market_id)
@@ -2008,7 +2012,11 @@ def _run_one_market(client: KalshiClient, cfg: dict) -> bool:
         reason = f"Spread {spread_at_entry_c}c > {max_spread}c max for {regime_label}"
         blog("INFO", f"Regime filter: {reason}")
         skip_id = insert_trade({**_ctx, "market_id": market_id, "regime_snapshot_id": snapshot_id,
-                               "ticker": ticker, "side": side, "outcome": "skipped", "skip_reason": reason})
+                               "ticker": ticker, "side": side, "outcome": "skipped", "skip_reason": reason,
+                               "yes_ask_at_entry": polled_ya, "no_ask_at_entry": polled_na,
+                               "yes_bid_at_entry": polled_yb, "no_bid_at_entry": polled_nb,
+                               "spread_at_entry_c": spread_at_entry_c, "spread_regime": spread_regime_label,
+                               "num_price_samples": len(poll_prices_seen) if poll_prices_seen else 0})
         _skip_wait_loop(client, cfg, close_dt, skip_id, ticker,
                         regime_label, gate.get("risk_level", "unknown"), reason,
                         resolve_inline=True, market_id=market_id)
