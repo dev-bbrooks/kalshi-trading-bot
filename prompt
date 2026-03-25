@@ -1,0 +1,273 @@
+Phase 4 — Dashboard
+
+Phases 1-3 are complete. Platform foundation, plugin data/strategy layer, and trading engine all work. engine.py btc_15m runs, observes markets, writes observations, feeds the Observatory. Now build the dashboard so everything is visible and controllable.
+
+Read PLATFORM_REFACTOR.md, DASHBOARD_UPDATE.md, and FLASK_STARTER_KIT.md for architecture and patterns. Read the old dashboard at /opt/15-min-btc-bot/dashboard.py (~13,560 lines) OR legacy/dashboard.py for complete implementation reference — copy the UI code and adapt it, don’t rewrite from scratch. The visual design and UX are battle-tested for mobile.
+
+Notes from previous phases:
+
+- plugin_state uses state_json blob. get_plugin_state returns {“status”, “status_detail”, “state”: {…}, “last_updated”}. The “state” dict contains all the dynamic fields (active_trade, live_market, bankroll_cents, lifetime_pnl, etc.)
+- Plugin API routes prefixed /api/btc_15m/
+- Platform API routes have no prefix: /api/state, /api/config, /api/command, /api/logs, etc.
+- Config is namespaced: btc_15m.trading_mode in DB, but load_config() strips prefix so plugin code uses “trading_mode”
+- No localStorage anywhere — iOS PWA constraint
+- The current toast uses translucent backdrop-filter blur with rgba backgrounds and color-coded borders (green, red, yellow, blue, orange, purple). See FLASK_STARTER_KIT.md for the exact implementation.
+
+Core design rule: FIVE tabs always: Trades, Regimes, Home, Stats, Settings. Platform owns these tabs. Plugins provide COMPONENTS that get composed INTO them. Never duplicate tabs. With one plugin, the dashboard looks identical to the old app.
+
+PART A: Platform Dashboard Shell (dashboard.py at /opt/trading-platform/dashboard.py)
+
+This is the main Flask app. ~4,000-5,000 lines. Read old dashboard + FLASK_STARTER_KIT.md for patterns.
+
+1. Flask app setup — single-file, inline template strings, same patterns as old
+1. Security — copy from old dashboard:
+- HTTP Basic Auth with cookie session (requires_auth decorator)
+- Login rate limiting (in-memory, 5 failed attempts per 10 min window)
+- CSRF token generation and validation
+- Destruction PIN for dangerous operations (reset, wipe)
+1. PWA infrastructure — copy from old:
+- /manifest.json endpoint
+- /service-worker.js endpoint
+- Apple touch icon, viewport meta, theme-color, apple-mobile-web-app meta tags
+- Standalone display mode
+1. Plugin discovery:
+   import os, importlib
+   PLUGINS = []
+   plugins_dir = os.path.join(os.path.dirname(**file**), “plugins”)
+   for name in sorted(os.listdir(plugins_dir)):
+   init_path = os.path.join(plugins_dir, name, “**init**.py”)
+   if os.path.isfile(init_path):
+   mod = importlib.import_module(f”plugins.{name}”)
+   # Find MarketPlugin subclass
+   plugin = None
+   for attr in dir(mod):
+   cls = getattr(mod, attr)
+   if isinstance(cls, type) and hasattr(cls, ‘plugin_id’):
+   try:
+   plugin = cls()
+   break
+   except: pass
+   if not plugin:
+   from plugins.{name}.plugin import *  # fallback
+   PLUGINS.append(plugin)
+   plugin.register_routes(app)
+1. CSS framework — copy the COMPLETE base stylesheet from the old dashboard. This includes:
+- CSS variables (–bg, –card, –border, –text, –dim, –green, –red, –yellow, –blue, –orange, –purple)
+- Fixed header, fixed tab bar, scrollable #contentWrap between them
+- Safe area insets (env(safe-area-inset-top), padding-bottom for home indicator)
+- Card styles, chip/tag styles, button styles
+- Input font-size: 16px minimum (prevents iOS auto-zoom)
+- Modal/overlay styles
+- overscroll-behavior: contain on scrollable areas
+  Copy it faithfully — this CSS is battle-tested on iOS.
+1. Tab framework — 5 fixed tabs:
+- Tab bar at bottom: Trades, Regimes, Home (center, default), Stats, Settings
+- Tab switching JS: show/hide content divs, update active tab indicator
+- Each tab content div: id=“tradesContent”, “regimesContent”, “homeContent”, “statsContent”, “settingsContent”
+1. HTML template structure:
+   
+   <!DOCTYPE html>
+   
+   <head> [meta, PWA tags, CSS] </head>
+   <body>
+     <header id="stickyHeader">
+       [bankroll display — tappable to open bankroll modal]
+       [per-plugin header rows injected here: plugin.render_header_html()]
+     </header>
+     <div id="contentWrap">
+       <div id="homeContent"> [shared BTC chart] [plugin home cards] </div>
+       <div id="tradesContent"> [filter bar] [unified trade list] </div>
+       <div id="regimesContent"> [shared regime chart] [plugin regime configs] </div>
+       <div id="statsContent"> [global stats] [plugin stats sections] </div>
+       <div id="settingsContent"> [platform settings] [plugin settings] </div>
+     </div>
+     <nav id="tabBar"> [5 tab buttons] </nav>
+     [bankroll modal]
+     [toast container]
+     <script> [platform JS] [plugin JS] </script>
+   </body>
+1. Plugin content injection — at template render time:
+   header_html = “\n”.join(p.render_header_html() for p in PLUGINS)
+   home_cards = “\n”.join(p.render_home_card_html() for p in PLUGINS)
+   regime_configs = “\n”.join(p.render_regime_config_html() for p in PLUGINS)
+   stats_sections = “\n”.join(p.render_stats_section_html() for p in PLUGINS)
+   settings_sections = “\n”.join(p.render_settings_html() for p in PLUGINS)
+   plugin_js = “\n”.join([p.render_js() for p in PLUGINS if hasattr(p, ‘render_js’)])
+   
+   Note: Some plugins may have a single render_js() method instead of separate render_home_card_js, render_header_js, etc. Either pattern is fine — just concatenate all JS.
+1. Platform API endpoints:
+   GET / — render full page
+   GET /api/state — returns merged state for all plugins + bankroll
+   GET /api/trades — unified trade list (query each plugin’s trade endpoint, merge by created_at desc)
+   GET /api/config — all config
+   POST /api/config — update config keys (expects {key: value} pairs, already namespaced)
+   POST /api/command — {plugin_id: “btc_15m”, command: “start”, params: {mode: “continuous”}}
+   GET /api/logs?source=btc_15m&limit=50
+   GET /api/logs/after?source=btc_15m&after_id=123
+   POST /api/push/subscribe — save push subscription
+   POST /api/push/unsubscribe — remove subscription
+   GET /api/push/key — VAPID public key
+   GET /api/push/log — notification history
+   GET /api/system_stats — CPU, memory, disk, network, uptime (same implementation as old)
+   POST /api/deploy — file upload + syntax check + backup + deploy + restart services
+   POST /api/backup — database backup
+   GET /api/bankroll/chart?plugin_id=btc_15m
+   GET /api/pnl/chart?plugin_id=btc_15m
+   GET /api/regime/current?asset=BTC — current regime snapshot
+   GET /api/regime/candles?asset=BTC&hours=4 — candle chart data
+   POST /api/login — auth endpoint
+   GET /api/services — supervisor service status
+   POST /api/services/restart — restart services
+1. Platform-owned UI components:
+- Bankroll modal: balance (from Kalshi via plugin state), lifetime P&L (sum across plugins or per-plugin if filtered), bankroll chart, P&L chart. Copy from old dashboard.
+- Toast system: translucent backdrop-filter blur, 6 colors. Copy from FLASK_STARTER_KIT.md.
+- Modal framework: .confirm-overlay + .modal-panel, _modalCount tracking, tap-outside-to-close. Copy from old.
+- Pull-to-refresh: progress bar below header, resistance curve, check scroller.scrollTop not window.scrollY, disabled during modals/charts. Copy from old.
+- Settings tab platform section: Services (start/stop/restart supervisor programs), Deploy (file upload), Push notifications (subscription management, quiet hours), System stats (CPU/mem/disk/uptime), Security (destruction PIN), Database (backup, export)
+1. BTC regime chart in Regimes tab — platform owns this since it’s asset data:
+- Query candles table for BTC
+- Render candlestick or line chart (same as old dashboard’s BTC chart)
+- Show current regime classification from regime_snapshots
+
+PART B: BTC 15m Plugin Dashboard (plugins/btc_15m/dashboard.py)
+
+This file implements all the render methods and registers API routes. ~8,000-10,000 lines.
+Read the old dashboard thoroughly — copy the HTML/JS for each section and adapt.
+
+1. register_routes(app) — ALL /api/btc_15m/* endpoints:
+   /api/btc_15m/state — plugin-specific state
+   /api/btc_15m/trades — trade list with filtering (three-state filter system)
+   /api/btc_15m/trades/<id> — single trade detail
+   /api/btc_15m/trade_summary — filtered summary stats
+   /api/btc_15m/observations — observation list
+   /api/btc_15m/observation_count
+   /api/btc_15m/lifetime_stats
+   /api/btc_15m/regime_stats — per-regime breakdown
+   /api/btc_15m/hourly_stats
+   /api/btc_15m/strategy_results
+   /api/btc_15m/recommendation — advisor recommendation for current regime
+   /api/btc_15m/fv_edge — current FV model edge
+   /api/btc_15m/price_path/<trade_id>
+   /api/btc_15m/live_prices — chart data
+   /api/btc_15m/skip_analysis
+   /api/btc_15m/shadow_stats
+   /api/btc_15m/performance
+   /api/btc_15m/execution_quality
+   /api/btc_15m/feature_importance
+   /api/btc_15m/surface_data
+   /api/btc_15m/export_ai_analysis — markdown export
+   /api/btc_15m/regime_worker_status
+   /api/btc_15m/walkforward_selection
+   /api/btc_15m/validation_summary
+   All import from plugins.btc_15m.market_db for queries.
+1. render_header_html() — mode strip for this plugin:
+   
+   <div class="plugin-header" data-plugin="btc_15m">
+     <span class="plugin-label">15m</span>
+     <div class="mode-strip"> [Observe] [Shadow] [Hybrid] [Auto] [Manual] </div>
+     <div class="status-dot" id="btc15mStatus"></div>
+   </div>
+   With one plugin, the "15m" label can be subtle or hidden.
+   Copy mode strip styling and behavior from old dashboard header.
+1. render_home_card_html() — the main home card:
+- Status bar (Offline/Stopped/Observing/Trading/Buying)
+- Live market info: ticker, prices (YES/NO ask/bid), regime label, time remaining, FV model edge
+- Active trade card (when in trade): side, entry price, current bid, sell target, progress bar, estimated P&L, time remaining
+- Last completed trade summary
+- Observatory health: observations written, drop rate
+  Copy Home tab content from old dashboard.
+1. render_trade_card_template() — JS function for rendering one trade card:
+   Copy trade card rendering from old dashboard. Each card shows:
+- Outcome dot (green/red/gray), side badge, P&L
+- Strategy tags: CHEAPER/MODEL/YES/NO, EARLY/MID/LATE, entry price, SOLD/HOLD
+- Regime label, time
+- Expandable details
+  Add small “15m” badge for multi-plugin future.
+1. render_regime_config_html() — per-plugin regime settings:
+- Risk level action selectors (low/moderate/high/terrible/unknown -> normal/skip)
+- Per-regime override list with add/remove
+- Per-regime granular filters (blocked hours, blocked days, vol range, max spread, blocked sides, stability max)
+  Copy Regimes tab settings from old dashboard.
+1. render_stats_section_html() — plugin stats section:
+- Summary cards: Win Rate, Total P&L, ROI, Profit Factor, Total Trades
+- Shadow trading summary
+- Observatory metrics: observation count, capture rate
+- Sub-page links: Performance, Regime Analysis, Shadow Trading
+  Copy Stats tab from old dashboard.
+  Sub-pages can be inline expandable sections or separate views navigable within the Stats tab.
+1. render_settings_html() — plugin settings:
+- Strategy picker: side selector (cheaper/yes/no/model), sell target slider, entry max slider, timing selector
+- Bet sizing: mode (flat/percent/edge_scaled), amount input, edge tier config
+- Execution: adaptive entry toggle, trailing stop %, early exit EV toggle, dynamic sell toggle + floor
+- Auto-strategy: min samples, min EV, fee buffer
+- Push notification per-type toggles for this plugin
+  Copy Settings tab plugin sections from old dashboard.
+1. render_js() or individual render_*_js() methods — ALL client-side JavaScript:
+- State polling loop (fetches /api/state every 2-3 seconds, updates all UI elements)
+- Home card: live market updates, active trade card updates, countdown timer
+- Trade list: three-state filter system (tap=include, tap=exclude, tap=default), 17 filter dimensions, infinite scroll or paginated load, filter chips with color coding
+- Stats: load lifetime stats, render summary cards, sub-page navigation
+- Settings: save handlers for every setting, mode strip click handlers
+- Header: mode switching, status dot color
+- Charts: BTC price mini-chart on home, trade price path chart on trade detail
+  ALL fetch URLs must use the /api/btc_15m/ prefix for plugin endpoints.
+  Platform endpoints (/api/state, /api/command, /api/config) keep their existing paths.
+  Command sends must include plugin_id: fetch(’/api/command’, {body: JSON.stringify({plugin_id: ‘btc_15m’, command: ‘start’, params: {mode: ‘continuous’}})})
+
+PART C: Deployment
+
+1. Create supervisor config /etc/supervisor/conf.d/trading-platform.conf:
+   [program:platform-dashboard]
+   command=/usr/bin/python3 /opt/trading-platform/dashboard.py
+   directory=/opt/trading-platform
+   user=root
+   autostart=true
+   autorestart=true
+   stderr_logfile=/var/log/platform-dashboard.err.log
+   stdout_logfile=/var/log/platform-dashboard.out.log
+   environment=PLATFORM_DIR=”/opt/trading-platform”
+   
+   [program:plugin-btc-15m]
+   command=/usr/bin/python3 /opt/trading-platform/engine.py btc_15m
+   directory=/opt/trading-platform
+   user=root
+   autostart=true
+   autorestart=true
+   stderr_logfile=/var/log/plugin-btc-15m.err.log
+   stdout_logfile=/var/log/plugin-btc-15m.out.log
+   environment=PLATFORM_DIR=”/opt/trading-platform”
+1. Update nginx to proxy to new dashboard (same domain dash.btcbotapp.com, same port 8050)
+1. Stop old supervisor programs if still configured:
+   supervisorctl stop kalshi-bot kalshi-dashboard
+1. supervisorctl reread && supervisorctl update
+1. Start: supervisorctl start platform-dashboard plugin-btc-15m
+
+Verification:
+
+1. python3 -m py_compile dashboard.py plugins/btc_15m/dashboard.py
+1. Visit dash.btcbotapp.com — full dashboard loads
+1. All 5 tabs visible and functional
+1. Home: status bar, live market data, regime info, observatory health
+1. Trades: filter system works, trade cards render, stats card updates with filters
+1. Regimes: BTC chart loads, regime classification shows, filter config saves
+1. Stats: summary cards, sub-pages accessible
+1. Settings: mode changes persist, strategy picker works, execution toggles work, services control works
+1. Push notification subscription works
+1. Deploy upload works
+1. Bankroll modal opens with balance and charts
+1. Toast notifications appear correctly (translucent, color-coded)
+1. Pull-to-refresh works on all tabs
+
+Critical iOS PWA rules:
+
+- No localStorage — all state in JS vars or server-side
+- Input font-size >= 16px
+- padding-bottom: 30px on tab bar (home indicator)
+- env(safe-area-inset-top) on toasts and header
+- overscroll-behavior: contain on all scrollable areas
+- Pull-to-refresh checks scroller.scrollTop, not window.scrollY
+- Copy CSS from old dashboard — don’t reinvent it
+
+The old dashboard is ~13,560 lines. Don’t try to rewrite from scratch. Copy the UI code section by section and adapt URLs, state access patterns, and config namespacing. The visual design and UX are months of iteration.
+
+This is the biggest phase. Take it methodically — get the shell rendering first, then add tabs one at a time. Ask if anything is unclear before starting. Summarize when done.
