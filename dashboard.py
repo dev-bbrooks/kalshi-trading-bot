@@ -1111,8 +1111,12 @@ def api_reset():
 def app_js():
     """Serve all JS as external file to avoid inline script size issues on iOS."""
     platform_js = _PLATFORM_JS
-    plugin_js = "\n".join(p.render_js() for p in PLUGINS if hasattr(p, 'render_js'))
-    js = platform_js + "\n" + plugin_js
+    plugin_js_parts = []
+    for p in PLUGINS:
+        if hasattr(p, 'render_js'):
+            # Wrap each plugin's JS in an IIFE to avoid let/const redeclaration conflicts
+            plugin_js_parts.append("(function() {\n" + p.render_js() + "\n})();")
+    js = platform_js + "\n" + "\n".join(plugin_js_parts)
     resp = Response(js, content_type="application/javascript")
     resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return resp
@@ -1170,6 +1174,7 @@ MAIN_HTML = r"""<!DOCTYPE html>
                   background: var(--card);
                   border-bottom: 1px solid var(--border);
                   padding: 10px 14px;
+                  padding-top: calc(env(safe-area-inset-top, 0px) + 10px);
                   box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
   .tab-bar { position: fixed; bottom: 0; left: 0; right: 0; z-index: 100;
     display: flex; align-items: stretch; justify-content: space-around;
@@ -1650,40 +1655,11 @@ MAIN_HTML = r"""<!DOCTYPE html>
 
 <!-- ═══ PAGE: TRADES ═══ -->
 <div id="pageTrades" class="page" style="padding:0 16px">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-    <div class="dim" style="font-size:10px;font-weight:600;letter-spacing:0.5px">TRADES</div>
-  </div>
   <!-- PLUGIN_TRADE_TEMPLATES -->
-  <div id="tradeList"></div>
-  <div id="tradeLoadMore" style="display:none;text-align:center;padding:16px">
-    <button onclick="loadMoreTrades()" class="btn btn-dim" style="font-size:12px;padding:8px 16px;width:auto">Load more</button>
-  </div>
 </div>
 
 <!-- ═══ PAGE: REGIMES ═══ -->
 <div id="pageRegimes" class="page" style="padding:0 16px">
-  <!-- BTC price and chart (platform-owned) -->
-  <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:8px">
-    <div>
-      <div class="dim" style="font-size:10px;font-weight:600;letter-spacing:0.5px">BITCOIN</div>
-      <div id="btcPriceMain" style="font-size:24px;font-weight:700;font-family:monospace">&mdash;</div>
-      <div id="btcReturns" class="dim" style="font-size:11px"></div>
-    </div>
-    <div class="filter-chips" style="margin:0">
-      <button class="chip active" data-btcrange="60" onclick="loadBtcChart(60,this)">1h</button>
-      <button class="chip" data-btcrange="240" onclick="loadBtcChart(240,this)">4h</button>
-      <button class="chip" data-btcrange="1440" onclick="loadBtcChart(1440,this)">24h</button>
-    </div>
-  </div>
-  <div style="position:relative;margin-bottom:12px">
-    <canvas id="btcChart" style="width:100%;height:160px;border-radius:6px;background:var(--card);border:1px solid var(--border)"></canvas>
-  </div>
-  <!-- Current regime box -->
-  <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:12px;border-left:3px solid var(--blue)" id="regimeCurrentBox">
-    <div class="dim" style="font-size:10px;font-weight:600;letter-spacing:0.5px;margin-bottom:6px">CURRENT REGIME</div>
-    <div id="regimeCurrentContent"><div class="dim">Loading...</div></div>
-  </div>
-  <!-- Plugin regime configs -->
   <!-- PLUGIN_REGIME_CONFIGS -->
 </div>
 
@@ -1696,13 +1672,6 @@ MAIN_HTML = r"""<!DOCTYPE html>
 <div id="pageSettings" class="page" style="padding:0 12px">
   <!-- Plugin settings -->
   <!-- PLUGIN_SETTINGS -->
-
-  <!-- ─── NOTIFICATIONS (platform-owned) ─── -->
-  <div class="settings-card">
-    <div class="sc-title">NOTIFICATIONS</div>
-    <div id="pushStatus" class="dim" style="margin-bottom:6px;font-size:11px">Checking...</div>
-    <button class="btn btn-blue" id="pushToggleBtn" onclick="togglePush()" style="display:none;margin-bottom:8px">Enable Notifications</button>
-  </div>
 
   <!-- ─── SECURITY (platform-owned) ─── -->
   <div class="settings-card">
@@ -1853,7 +1822,7 @@ _PLATFORM_JS = r"""
 //  PLATFORM JAVASCRIPT
 // ═══════════════════════════════════════════════════════════════
 
-const $ = s => document.querySelector(s);
+var $ = function(s) { return document.querySelector(s); };
 function _cw() { return document.getElementById('contentWrap'); }
 function scrollTop() { const c = _cw(); if (c) c.scrollTop = 0; }
 
@@ -1873,7 +1842,7 @@ function hideSkel(id) {
 }
 
 // ── Modal system ──
-let _modalCount = 0;
+var _modalCount = 0;
 
 function openModal(id) {
   const el = document.getElementById(id);
@@ -1930,7 +1899,7 @@ document.addEventListener('touchmove', function(e) {
 }, {passive: false});
 
 // ── Tab system ──
-let _currentTab = 'Home';
+var _currentTab = 'Home';
 function switchTab(tab) {
   closeAllModals();
   _currentTab = tab;
@@ -1940,6 +1909,7 @@ function switchTab(tab) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('tab-active'));
   document.querySelectorAll('.tab-btn[data-tab="' + tab + '"]').forEach(b => b.classList.add('tab-active'));
   scrollTop();
+  _adjustContentTop();
   // Tab-specific init callbacks
   if (tab === 'Settings') { loadSvcStatus(); loadSystemStats(); loadAuditLog(); loadPinStatus(); }
   if (tab === 'Regimes') { loadBtcChart(); loadRegimeCurrent(); }
@@ -1972,7 +1942,7 @@ function showToast(msg, color) {
 }
 
 // ── Pull-to-refresh ──
-let _chartTouchActive = false;
+var _chartTouchActive = false;
 (function() {
   let startY = 0, pulling = false, triggered = false;
   const threshold = 180;
@@ -2246,7 +2216,7 @@ async function doBackup() {
 }
 
 // ── Push notification setup ──
-let pushSubscription = null;
+var pushSubscription = null;
 
 async function initPush() {
   const el = document.getElementById('pushStatus');
@@ -2369,10 +2339,21 @@ function doLogout() {
 }
 
 // ── Trade loading (placeholder for plugin JS) ──
-let _tradeOffset = 0;
+var _tradeOffset = 0;
 function loadMoreTrades() {
   // Plugins will override this
 }
+
+// ── Adjust content bounds dynamically ──
+function _adjustContentTop() {
+  var hdr = document.getElementById('stickyHeader');
+  var cw = document.getElementById('contentWrap');
+  var tb = document.querySelector('.tab-bar');
+  if (hdr && cw) cw.style.top = hdr.offsetHeight + 'px';
+  if (tb && cw) cw.style.bottom = tb.offsetHeight + 'px';
+}
+window.addEventListener('resize', _adjustContentTop);
+setTimeout(_adjustContentTop, 100);
 
 // ── Init ──
 initPush();

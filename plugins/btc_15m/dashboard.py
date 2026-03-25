@@ -836,47 +836,7 @@ def render_home_card_html():
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>Stopped &mdash; trade kept as ignored, sell order active
   </div>
 
-  <!-- Cash out (shown for ALL trades) -->
-  <div id="cashOutSection" style="margin-top:12px">
-    <button class="act-btn act-btn-red" id="cashOutBtn" onclick="showCashOut()">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3-3h-9m0 0 3-3m-3 3 3 3"/></svg>
-      <span>Cash Out</span>
-      <span id="cashOutEstimate" style="font-family:monospace;font-size:12px;margin-left:auto"></span>
-    </button>
-    <button class="act-btn act-btn-dim" id="cancelCashOutBtn" onclick="cancelCashOut()" style="display:none;margin-top:6px">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
-      Cancel Cash Out
-    </button>
-  </div>
-</div>
 
-<!-- Session Stats -->
-<div style="padding:0 16px;margin-top:12px" id="sessionStatsSection">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-    <div class="dim" style="font-size:10px;font-weight:600;letter-spacing:0.5px">SESSION</div>
-    <div style="display:flex;gap:6px">
-      <button id="recoverSessionBtn" onclick="recoverSession()" style="display:none;background:none;border:1px solid rgba(88,166,255,0.3);border-radius:4px;color:var(--blue);font-size:9px;padding:2px 8px;cursor:pointer;-webkit-tap-highlight-color:transparent">Recover</button>
-      <button onclick="resetSession()" style="background:none;border:1px solid var(--border);border-radius:4px;color:var(--dim);font-size:9px;padding:2px 8px;cursor:pointer;-webkit-tap-highlight-color:transparent">Reset</button>
-    </div>
-  </div>
-
-  <div class="stat-grid">
-    <div class="stat"><div class="label">Wins</div><div class="val pos" id="statWins">0</div></div>
-    <div class="stat"><div class="label">Losses</div><div class="val neg" id="statLosses">0</div></div>
-    <div class="stat"><div class="label">Win Rate</div><div class="val" id="statWinRate">&mdash;</div></div>
-    <div class="stat"><div class="label">P&amp;L</div><div class="val" id="statSessionPnl">$0</div></div>
-  </div>
-  <div class="stat-grid">
-    <div class="stat"><div class="label">W Streak</div><div class="val pos" id="statWinStreak">0</div></div>
-    <div class="stat"><div class="label">L Streak</div><div class="val neg" id="statLossStreak">0</div></div>
-    <div class="stat"><div class="label">Peak P&amp;L</div><div class="val" id="statPeakPnl">&mdash;</div></div>
-    <div class="stat"><div class="label">Drawdown</div><div class="val" id="statDrawdown">&mdash;</div></div>
-  </div>
-  <div class="stat-grid">
-    <div class="stat"><div class="label">Trades</div><div class="val" id="statTrades">0</div></div>
-    <div class="stat"><div class="label">Observed</div><div class="val" id="statSkips">0</div></div>
-    <div class="stat"><div class="label">Avg P&amp;L</div><div class="val" id="statAvgPnl">&mdash;</div></div>
-  </div>
 </div>
 """
 
@@ -1079,35 +1039,11 @@ def render_stats_section_html():
       <div class="snc-desc">Leaderboard, stability, fine vs coarse</div>
       <div class="snc-preview" id="hubRegimePreview"></div>
     </div>
-    <div class="stats-nav-card" onclick="statsNavTo('observatory')">
-      <div class="snc-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg></div>
-      <div class="snc-title">Observatory</div>
-      <div class="snc-desc">Strategy lab, net edge, hold vs sell, fees</div>
-      <div class="snc-preview" id="hubObsPreview"></div>
-    </div>
-    <div class="stats-nav-card" onclick="statsNavTo('models')">
-      <div class="snc-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20V10M18 20V4M6 20v-4"/></svg></div>
-      <div class="snc-title">Models &amp; Calibration</div>
-      <div class="snc-desc">Fair value, BTC surface, confidence, features</div>
-      <div class="snc-preview" id="hubModelPreview"></div>
-    </div>
-    <div class="stats-nav-card" onclick="statsNavTo('validation')">
-      <div class="snc-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg></div>
-      <div class="snc-title">Validation &amp; Execution</div>
-      <div class="snc-desc">Edge gaps, P&amp;L attribution, persistence, shadow trades</div>
-      <div class="snc-preview" id="hubValPreview"></div>
-    </div>
     <div class="stats-nav-card" onclick="statsNavTo('shadow')">
       <div class="snc-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10"/></svg></div>
       <div class="snc-title">Shadow Trading</div>
       <div class="snc-desc">Real execution data, fills, slippage, outcomes</div>
       <div class="snc-preview" id="hubShadowPreview"></div>
-    </div>
-    <div class="stats-nav-card" onclick="statsNavTo('convergence')">
-      <div class="snc-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
-      <div class="snc-title">Data Convergence</div>
-      <div class="snc-desc">How much the numbers are still changing</div>
-      <div class="snc-preview" id="hubConvPreview"></div>
     </div>
   </div>
   <div style="height:20px"></div>
@@ -1221,20 +1157,6 @@ def render_settings_html():
       <input type="number" id="newTierMult" placeholder="Multiplier" step="0.1" min="0.1" max="5" style="width:80px;font-size:11px">
       <button class="btn btn-dim" style="font-size:10px;padding:2px 8px" onclick="_addEdgeTier()">Add</button>
     </div>
-  </div>
-
-  <div class="sc-sub">LOSS PROTECTION</div>
-  <div class="input-row" style="margin-top:0">
-    <label>Loss Stop</label>
-    <input type="number" id="maxConsecLosses" min="0" max="20" value="0"
-           style="width:60px" onchange="saveSetting('btc_15m.max_consecutive_losses',parseInt(this.value))">
-    <span class="dim">consec. losses (0=off)</span>
-  </div>
-  <div class="input-row">
-    <label>Cooldown</label>
-    <input type="number" id="cooldownAfterLoss" min="0" max="20" value="0"
-           style="width:60px" onchange="saveSetting('btc_15m.cooldown_after_loss_stop',parseInt(this.value))">
-    <span class="dim">markets to skip after stop</span>
   </div>
 
   <div class="sc-sub">EXECUTION</div>
@@ -1444,16 +1366,10 @@ let _regimeFilters = {};
 let currentRegimeFilter = 'all';
 let currentBankroll = 0;
 let currentLocked = 0;
-let _sessTrack = {maxWinStreak:0, maxLossStreak:0, curStreakType:null, curStreakLen:0, peakPnl:0, prevWins:0, prevLosses:0};
 let lastStateData = {_lastState:null, _lastTrade:null, _nextMarketOpen:null, _delayEndISO:null};
 let _regimeGroupMap = {};
 
 // ── Helpers ──
-function fmtPnl(val) {
-  const n = parseFloat(val) || 0;
-  return (n >= 0 ? '+' : '-') + '$' + Math.abs(n).toFixed(2);
-}
-
 function fmtMmSs(sec) {
   const m = Math.floor(sec / 60);
   const s = Math.floor(sec % 60);
@@ -1474,14 +1390,6 @@ function trendLabel(v) {
   if (v > 1) return 'Up (' + v + ')';
   if (v < -1) return 'Down (' + v + ')';
   return 'Flat (' + v + ')';
-}
-
-function hideSkel(id) {
-  const el = document.getElementById(id);
-  if (el && !el.classList.contains('skel-hidden')) {
-    el.classList.add('skel-hidden');
-    setTimeout(function() { el.style.display = 'none'; }, 300);
-  }
 }
 
 function _autoFitStatVals() {
@@ -1572,10 +1480,6 @@ function renderUI(s) {
         statusMain = 'Stopped';
         if (hasActiveTrade) statusMain = 'Stopped \u00b7 trade active';
       }
-    } else if (state.cashing_out) {
-      statusMain = 'CASHING OUT';
-      dotClass = 'dot-red';
-      statusColor = 'var(--red)';
     } else if (hasPendingTrade) {
       const pt = state.pending_trade;
       statusMain = 'Buying ' + (pt.side || '').toUpperCase();
@@ -1832,49 +1736,19 @@ function renderUI(s) {
       if (pend) pend.style.display = 'none';
     }
 
-    // Session stats
-    const sw = state.session_wins || 0;
-    const sl = state.session_losses || 0;
-    const sp = state.session_pnl || 0;
-    const sTotal = sw + sl;
-    const sWr = sTotal > 0 ? (sw / sTotal * 100).toFixed(0) : '\u2014';
-    const sAvg = sTotal > 0 ? (sp / sTotal) : 0;
-    const sStatWins = document.getElementById('statWins');
-    const sStatLosses = document.getElementById('statLosses');
-    const sStatWinRate = document.getElementById('statWinRate');
-    const sStatPnl = document.getElementById('statSessionPnl');
-    const sStatTrades = document.getElementById('statTrades');
-    const sStatSkips = document.getElementById('statSkips');
-    const sStatAvgPnl = document.getElementById('statAvgPnl');
-    if (sStatWins) sStatWins.textContent = sw;
-    if (sStatLosses) sStatLosses.textContent = sl;
-    if (sStatWinRate) sStatWinRate.textContent = sWr === '\u2014' ? '\u2014' : sWr + '%';
-    if (sStatPnl) { sStatPnl.textContent = fmtPnl(sp); sStatPnl.className = 'val ' + (sp >= 0 ? 'pos' : 'neg'); }
-    if (sStatTrades) sStatTrades.textContent = sTotal;
-    if (sStatSkips) sStatSkips.textContent = state.session_skips || 0;
-    if (sStatAvgPnl) sStatAvgPnl.textContent = sTotal > 0 ? fmtPnl(sAvg) : '\u2014';
-
-    // Streaks
-    const wStreak = document.getElementById('statWinStreak');
-    const lStreak = document.getElementById('statLossStreak');
-    const peakEl = document.getElementById('statPeakPnl');
-    const ddEl = document.getElementById('statDrawdown');
-    if (wStreak) wStreak.textContent = _sessTrack.maxWinStreak;
-    if (lStreak) lStreak.textContent = _sessTrack.maxLossStreak;
-    if (peakEl) peakEl.textContent = fmtPnl(_sessTrack.peakPnl);
-
-    _autoFitStatVals();
+    // Adjust content top for dynamic header height
+    if (typeof _adjustContentTop === 'function') _adjustContentTop();
 
   } catch(e) { console.error('BTC15m renderUI error:', e); }
 }
 
 // ── Mode switching ──
 const MODE_META = {
-  observe: { label: 'Observe', color: 'var(--yellow)', toast: 'Observe mode \u2014 recording data' },
-  shadow:  { label: 'Shadow',  color: '#a371f7',       toast: 'Shadow mode \u2014 1-contract trades' },
-  hybrid:  { label: 'Hybrid',  color: 'var(--blue)',    toast: 'Hybrid mode \u2014 auto + shadow fallback' },
-  auto:    { label: 'Auto',    color: 'var(--green)',   toast: 'Auto mode \u2014 full trades only' },
-  manual:  { label: 'Manual',  color: 'var(--text)',    toast: 'Manual mode \u2014 picker strategy' },
+  observe: { label: 'Observe', color: 'var(--yellow)', toast: 'Observe mode \u2014 recording data', autoStart: true },
+  shadow:  { label: 'Shadow',  color: '#a371f7',       toast: 'Shadow mode \u2014 1-contract trades', autoStart: true },
+  hybrid:  { label: 'Hybrid',  color: 'var(--blue)',    toast: 'Hybrid mode \u2014 auto + shadow fallback', autoStart: true },
+  auto:    { label: 'Auto',    color: 'var(--green)',   toast: 'Auto mode \u2014 full trades only', autoStart: false },
+  manual:  { label: 'Manual',  color: 'var(--text)',    toast: 'Manual mode \u2014 picker strategy', autoStart: false },
 };
 
 function _syncModeStrip(mode) {
@@ -1893,15 +1767,15 @@ async function setTradingMode(mode) {
   if (!MODE_META[mode]) return;
   var meta = MODE_META[mode];
   await saveSetting('btc_15m.trading_mode', mode);
+  if (_uiState.state) _uiState.state.trading_mode = mode;
   _syncModeStrip(mode);
-  // Send command to plugin
-  await api('/api/command', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({plugin_id: 'btc_15m', command: 'update_config', params: {trading_mode: mode}})
-  });
-  showToast(meta.toast, mode === 'observe' ? 'yellow' : mode === 'shadow' ? 'purple' :
-            mode === 'hybrid' ? 'blue' : mode === 'auto' ? 'green' : 'yellow');
+  // Auto-start in data-collecting modes if not already running
+  if (meta.autoStart && _uiState.state && !_uiState.state.auto_trading) {
+    cmd('start', {mode: 'continuous', count: 0});
+  }
+  var toastColor = mode === 'observe' ? 'yellow' : mode === 'shadow' ? 'purple' :
+            mode === 'hybrid' ? 'blue' : mode === 'auto' ? 'green' : 'yellow';
+  showToast(meta.toast, toastColor);
   setTimeout(pollState, 800);
 }
 
@@ -2491,11 +2365,9 @@ async function _statsLoadPage(page) {
   try {
     switch(page) {
       case 'performance': await _statsRenderPerformance(el); break;
+      case 'conditions': await _statsRenderPerformance(el); break;
       case 'regimes': await _statsRenderRegimes(el); break;
-      case 'observatory': await _statsRenderObservatory(el); break;
       case 'shadow': await _statsRenderShadowPage(el); break;
-      case 'models': await _statsRenderModels(el); break;
-      case 'validation': await _statsRenderValidation(el); break;
       default: el.innerHTML = '<div class="dim">Coming soon</div>';
     }
   } catch(e) {
@@ -2556,29 +2428,6 @@ async function _statsRenderRegimes(el) {
   el.innerHTML = html;
 }
 
-async function _statsRenderObservatory(el) {
-  try {
-    var results = await Promise.all([
-      api('/api/btc_15m/observation_count'),
-      api('/api/btc_15m/strategy_results?setup_type=global')
-    ]);
-    var count = results[0];
-    var strats = results[1];
-    var html = '<div class="card" style="padding:10px">' +
-      '<div style="font-size:22px;font-weight:700;font-family:monospace">' + ((count && count.total) || 0) + '</div>' +
-      '<div class="dim" style="font-size:10px">Observations Recorded</div></div>';
-    if (strats && strats.length) {
-      html += '<div class="dim" style="font-size:10px;font-weight:600;margin:8px 0 4px">TOP STRATEGIES (Global)</div>';
-      strats.slice(0, 15).forEach(function(s) {
-        var evColor = (s.tw_ev_c||0) > 0 ? 'var(--green)' : 'var(--red)';
-        html += '<div class="stat-row"><span class="sr-label" style="font-family:monospace;font-size:11px">' + (s.strategy_key||'') + '</span>' +
-          '<span class="sr-val" style="color:' + evColor + '">' + (s.tw_ev_c||0).toFixed(2) + '\u00a2 (' + (s.sample_size||0) + ' obs)</span></div>';
-      });
-    }
-    el.innerHTML = html;
-  } catch(e) { el.innerHTML = '<div class="dim">Error: ' + e.message + '</div>'; }
-}
-
 async function _statsRenderShadowPage(el) {
   var data = await api('/api/btc_15m/shadow_stats');
   if (!data || !data.total) { el.innerHTML = '<div class="dim">No shadow trade data</div>'; return; }
@@ -2592,43 +2441,6 @@ async function _statsRenderShadowPage(el) {
     '<div class="stat-summary-grid" style="margin-top:6px">' +
     '<div class="stat-summary-card"><div class="ssc-val">' + Math.round(data.avg_latency||0) + 'ms</div><div class="ssc-label">Avg Latency</div></div>' +
     '</div>';
-}
-
-async function _statsRenderModels(el) {
-  try {
-    var results = await Promise.all([
-      api('/api/btc_15m/feature_importance'),
-      api('/api/btc_15m/validation_summary')
-    ]);
-    var features = results[0] || [];
-    var validation = results[1] || {};
-    var html = '<div class="stat-category">Walk-Forward Validation</div>';
-    html += _sRow('Total Strategies', validation.total || 0);
-    html += _sRow('OOS Validated', validation.validated || 0, 'pos');
-    html += _sRow('Positive EV', validation.positive_ev || 0, 'pos');
-    if (features.length) {
-      html += '<div class="stat-category" style="margin-top:12px">Feature Importance</div>';
-      features.slice(0, 15).forEach(function(f) {
-        html += _sRow(f.feature_name || f.name || '?', ((f.importance||0)*100).toFixed(1) + '%');
-      });
-    }
-    el.innerHTML = html;
-  } catch(e) { el.innerHTML = '<div class="dim">Error: ' + e.message + '</div>'; }
-}
-
-async function _statsRenderValidation(el) {
-  try {
-    var data = await api('/api/btc_15m/walkforward_selection');
-    if (!data || !data.length) { el.innerHTML = '<div class="dim">No validated strategies yet</div>'; return; }
-    var html = '<div class="dim" style="font-size:10px;font-weight:600;margin-bottom:6px">OOS VALIDATED STRATEGIES</div>';
-    data.forEach(function(s) {
-      var evColor = (s.tw_ev_c||0) > 0 ? 'var(--green)' : 'var(--red)';
-      html += '<div class="stat-row"><span class="sr-label" style="font-family:monospace;font-size:11px">' + (s.strategy_key||'') + '</span>' +
-        '<span class="sr-val" style="color:' + evColor + '">' + (s.tw_ev_c||0).toFixed(2) + '\u00a2' +
-        ' | OOS: ' + ((s.oos_ev_c||0) >= 0 ? '+' : '') + (s.oos_ev_c||0).toFixed(2) + '\u00a2 (' + (s.oos_sample_size||0) + ')</span></div>';
-    });
-    el.innerHTML = html;
-  } catch(e) { el.innerHTML = '<div class="dim">Error: ' + e.message + '</div>'; }
 }
 
 function _statsExportCsv() {
@@ -2738,7 +2550,7 @@ async function loadBtcChart(minutes, btn) {
     btn.className = 'chip active';
   }
   try {
-    var data = await api('/api/candles?asset=BTC&source=binance&minutes=' + _btcChartRange);
+    var data = await api('/api/regime/candles?minutes=' + _btcChartRange);
     if (!data || !data.length) return;
     // Update BTC price display
     var last = data[data.length - 1];
@@ -2844,11 +2656,6 @@ async function loadConfig() {
     if (qs && cfg['btc_15m.push_quiet_start']) qs.value = cfg['btc_15m.push_quiet_start'];
     var qe = document.getElementById('quietEnd');
     if (qe && cfg['btc_15m.push_quiet_end']) qe.value = cfg['btc_15m.push_quiet_end'];
-    // Loss protection
-    var mcl = document.getElementById('maxConsecLosses');
-    if (mcl && cfg['btc_15m.max_consecutive_losses']) mcl.value = cfg['btc_15m.max_consecutive_losses'];
-    var cal = document.getElementById('cooldownAfterLoss');
-    if (cal && cfg['btc_15m.cooldown_after_loss_stop']) cal.value = cfg['btc_15m.cooldown_after_loss_stop'];
     // Mode
     if (cfg['btc_15m.trading_mode']) _syncModeStrip(cfg['btc_15m.trading_mode']);
   } catch(e) { console.error('loadConfig error:', e); }
@@ -2891,30 +2698,6 @@ function _onAutoStratTradeAllToggle(checked) {
   var banner = document.getElementById('autoStratTradeAllBanner');
   if (banner) banner.style.display = checked ? '' : 'none';
   saveSetting('btc_15m.auto_strat_trade_all', checked);
-}
-
-// ── Session ──
-function resetSession() {
-  cmd('reset_session');
-  _sessTrack = {maxWinStreak:0, maxLossStreak:0, curStreakType:null, curStreakLen:0, peakPnl:0, prevWins:0, prevLosses:0};
-  showToast('Session reset', 'green');
-}
-
-function recoverSession() {
-  cmd('recover_session');
-  showToast('Recovering session...', 'blue');
-}
-
-// ── Cash out ──
-function showCashOut() {
-  // Send cash out command to bot
-  cmd('cash_out');
-  showToast('Cash out initiated...', 'yellow');
-}
-
-function cancelCashOut() {
-  cmd('cancel_cash_out');
-  showToast('Cash out cancelled', 'blue');
 }
 
 // ── Simulated trade shuffle ──
@@ -2960,7 +2743,7 @@ async function togglePush() {
       showToast('Notifications disabled', 'yellow');
     } else {
       var reg = await navigator.serviceWorker.ready;
-      var resp = await api('/api/push/vapid_public');
+      var resp = await api('/api/push/vapid-key');
       var key = resp.key;
       var sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
@@ -3067,13 +2850,45 @@ window.addEventListener('focus', _refreshOnForeground);
 //  INITIALIZATION
 // ═══════════════════════════════════════════════════════════════
 
+// ── Expose functions to global scope for onclick handlers ──
+window.setTradingMode = setTradingMode;
+window.setTradeFilter = setTradeFilter;
+window.loadTrades = loadTrades;
+window.loadMoreTrades = loadMoreTrades;
+window.loadBtcChart = loadBtcChart;
+window.showTradeDetail = showTradeDetail;
+window.showDeleteTrade = showDeleteTrade;
+window.hideDelete = hideDelete;
+window.doDeleteTrade = doDeleteTrade;
+window.deleteAllIncomplete = deleteAllIncomplete;
+window.exportBtc15mCSV = exportBtc15mCSV;
+window.setRiskAction = setRiskAction;
+window.setRegimeFilter = setRegimeFilter;
+window.showRegimeDetail = showRegimeDetail;
+window.statsNavTo = statsNavTo;
+window.statsGoBack = statsGoBack;
+window.saveSetting = saveSetting;
+window.cmd = cmd;
+window.pollState = pollState;
+window.simShuffle = simShuffle;
+window.resetTradeCache = resetTradeCache;
+window.showPushLog = showPushLog;
+window.shareFile = shareFile;
+window.initPush = initPush;
+window.togglePush = togglePush;
+window._syncModeStrip = _syncModeStrip;
+window._applyStrategyPicker = _applyStrategyPicker;
+window._onBetModeChange = _onBetModeChange;
+window._onAutoStratTradeAllToggle = _onAutoStratTradeAllToggle;
+window._statsExportCsv = _statsExportCsv;
+
 (function _initBtc15m() {
   // Start polling
   var _pollRate = 1000;
   function schedulePoll() {
     setTimeout(async function() {
       await pollState();
-      _pollRate = (_uiState.state && _uiState.state.cashing_out) ? 500 : 1000;
+      _pollRate = (_uiState.state && _uiState.state.active_trade) ? 500 : 1000;
       schedulePoll();
     }, _pollRate);
   }
