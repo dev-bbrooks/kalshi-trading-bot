@@ -1,0 +1,114 @@
+Phase 4 Dashboard — Bug Fix List
+
+The dashboard is partially working but has many visual, functional, and structural issues. Fix all of the following. Read the old dashboard at legacy/dashboard.py for the correct implementations — copy faithfully, don’t improvise.
+
+CRITICAL STRUCTURAL ISSUES:
+
+1. cmd() function missing plugin_id — The platform JS cmd() function sends {command, params} but the new /api/command endpoint expects {plugin_id, command_type, params}. The old cmd() didn’t need plugin_id because there was only one bot. Now it does. Either:
+   (a) Have cmd() accept a plugin_id parameter: cmd(‘btc_15m’, ‘start’, {mode: ‘continuous’})
+   (b) Or have the plugin JS override cmd() to inject plugin_id automatically
+   Check the /api/command route handler to see what field names it expects and make cmd() match.
+1. saveSetting() namespacing — The old saveSetting(‘trading_mode’, mode) saved a flat key. The new system needs namespaced keys: ‘btc_15m.trading_mode’. Check that saveSetting properly namespaces the key, and that the /api/config POST handler stores it correctly. The plugin’s setTradingMode already does saveSetting(‘btc_15m.trading_mode’, mode) — verify this works end-to-end.
+1. Content bounds / scrolling — The #contentWrap must be bounded between the header and tab bar. The old CSS was:
+   #contentWrap { position: fixed; top: 58px; left: 0; right: 0; bottom: 76px; overflow-y: auto; overscroll-behavior-y: contain; -webkit-overflow-scrolling: touch; padding: 8px 12px; }
+   But the header height changes when the mode strip is added (adds ~40px). The old dashboard dynamically measured header height. Check that the top offset of contentWrap accounts for the actual header height including the mode strip. If the mode strip makes the header taller, use padding-top on contentWrap equal to the header’s actual height, or use a JS measurement on load.
+1. Header height — The old dashboard used padding-top on contentWrap that matched the sticky header’s total height (including safe area inset for iOS notch). With the mode strip adding height, this needs to be recalculated. The old value was approximately:
+   padding-top: calc(env(safe-area-inset-top) + [header content height])
+   Or the header used padding-top: env(safe-area-inset-top) and contentWrap.top was set dynamically.
+
+REMOVED FEATURES STILL PRESENT:
+
+1. Session tracking in renderUI — The code references _sessTrack.maxWinStreak, _sessTrack.maxLossStreak, _sessTrack.peakPnl, session_wins, session_losses, session_pnl, session_skips. ALL session tracking was removed. Remove all session-related UI elements, variables, and stat displays. Stats should be lifetime only.
+1. Old stats sub-pages — Check if Observatory, Models & Calibration, Validation & Execution, Data Convergence sub-pages are present. These were ALL removed. Only Performance, Regime Analysis, and Shadow Trading sub-pages should exist.
+1. Cash out references — Any remaining cash_out UI elements, buttons, overlays, or command handlers in the JS should be removed.
+1. Loss streak display — If there’s a loss streak counter, cooldown display, or consecutive loss UI, remove it. The loss streak tracking was removed from bot.py.
+
+MODE SWITCHING:
+
+1. Mode switching not working — When tapping a mode button, the mode should:
+   (a) Save to config (btc_15m.trading_mode)
+   (b) Send update_config command to the plugin
+   (c) Visually highlight the selected mode button
+   (d) Show toast notification
+   (e) Auto-start bot in observe/shadow/hybrid modes if not running
+   Compare the new setTradingMode() against legacy/dashboard.py’s setTradingMode(). The old version had autoStart logic for data-collecting modes. The new version sends a separate API call — make sure the command format matches what process_commands() in bot.py expects.
+
+STATS TAB:
+
+1. Stats buttons don’t open anything — The stats sub-pages (Performance, Regime Analysis, Shadow Trading) need navigation. The old dashboard used a sub-page system where clicking a link replaced the stats content with a detail view, with a back button to return. Check that:
+   (a) The sub-page links have working onclick handlers
+   (b) The sub-page content containers exist in the HTML
+   (c) The sub-page load functions fetch from the correct API endpoints (/api/btc_15m/performance, /api/btc_15m/shadow_stats, /api/btc_15m/regime_stats)
+   (d) There’s a back button to return to the stats overview
+   Copy the stats sub-page navigation pattern from legacy/dashboard.py.
+
+VISUAL ISSUES:
+
+1. Live price chart — The live price chart on the Home tab should match the old dashboard’s chart style:
+- Dark background matching –bg
+- Green line for YES ask, red for NO ask
+- Subtle grid lines
+- Time axis showing minutes remaining
+- Smooth, thin lines (not thick or blocky)
+- Canvas-based rendering (same as old)
+  Copy the chart rendering from legacy/dashboard.py — search for the live price chart / BTC chart canvas rendering code.
+1. BTC candle chart on Regimes tab — Should be a proper candlestick chart with:
+- Green candles for up, red for down
+- Wicks/shadows
+- Dark background
+- Time axis
+- Current regime label overlay
+  Copy from legacy/dashboard.py’s loadBtcChart / renderBtcChart functions.
+1. Trade cards — Verify trade cards match the old style:
+- Left border color (green=win, red=loss, dim=skip, purple=shadow, blue=open)
+- Outcome text + PnL on same row
+- Strategy tags (CHEAPER/MODEL, EARLY/MID/LATE, entry price, SOLD/HOLD)
+- Regime label
+- Expandable detail section
+  Compare against legacy/dashboard.py renderTradeCard().
+1. Filter chips — The three-state filter system (tap=include green, tap=exclude red, tap=default gray) should work exactly like the old dashboard. Verify the filter cycling logic and color states.
+
+FUNCTIONAL ISSUES:
+
+1. Pull-to-refresh — Verify pull-to-refresh is implemented. It should:
+- Only trigger when scroller is at top (check scroller.scrollTop, NOT window.scrollY)
+- Show progress bar below header with resistance curve
+- Be disabled during modal/chart interactions
+- Change color from blue to green when threshold reached
+  Copy from legacy/dashboard.py.
+1. Bankroll modal — Verify the bankroll modal:
+- Opens when tapping bankroll display in header
+- Shows balance, lifetime P&L, W-L record
+- Has bankroll history chart and P&L history chart
+- Close button and tap-outside-to-close work
+  Copy from legacy/dashboard.py bankroll modal code.
+1. Push notification subscription — Verify:
+- Push toggle button works
+- VAPID key loads from /api/push/key (not /api/push/vapid-key — check which endpoint name is used)
+- Subscription saves correctly
+- Per-type notification toggles in settings work
+1. Deploy upload — Verify the deploy card in settings:
+- File input accepts .py files
+- Syntax check before deploy
+- Backup before overwrite
+- Service restart after deploy
+- Success/error feedback
+1. Services control — The services card in settings should show supervisor status and have start/stop/restart buttons. Verify the service names match the new supervisor config (platform-dashboard, plugin-btc-15m — NOT the old kalshi-bot, kalshi-dashboard names).
+
+GENERAL QUALITY:
+
+1. iOS safe areas — Verify:
+- Header has padding-top for notch: padding-top: env(safe-area-inset-top)
+- Tab bar has padding-bottom: 30px for home indicator
+- Toasts positioned below notch
+- Input font-size >= 16px everywhere (prevents iOS auto-zoom)
+1. No localStorage — Search for any localStorage or sessionStorage usage. Replace with JS variables. The old code used sessionStorage for tab selection — that’s okay as a progressive enhancement (try/catch wrapped), but localStorage must never be used.
+1. Toast system — Verify the toast uses the translucent style:
+- backdrop-filter: blur(12px)
+- rgba backgrounds with border
+- 6 colors: green, red, yellow, blue, orange, purple
+  Copy from FLASK_STARTER_KIT.md if not matching.
+
+Fix all of these issues. For each one, read the corresponding section in legacy/dashboard.py and copy the implementation faithfully. Don’t simplify or improvise — the old code works, use it.
+
+py_compile both dashboard.py and plugins/btc_15m/views.py (or dashboard.py) after all changes. Test by restarting: supervisorctl restart platform-dashboard
