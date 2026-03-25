@@ -2067,17 +2067,17 @@ async function lockFunds(amount) {
 async function loadBtcChart(minutes, btn) {
   if (btn) { btn.parentElement.querySelectorAll('.chip').forEach(c=>c.classList.remove('active')); btn.classList.add('active'); }
   minutes = minutes || 60;
-  const data = await api('/api/regime/candles?minutes='+minutes);
+  var data = await api('/api/regime/candles?minutes='+minutes);
   if (!data || !data.length) return;
-  drawLineChart('btcChart', data.map(d=>({x:d.ts, y:d.close})), 'var(--orange)');
-  const last = data[data.length-1];
-  const el = document.getElementById('btcPriceMain');
+  drawLineChart('btcChart', data.map(function(d){return{x:d.ts, y:d.close};}), 'var(--orange)');
+  var last = data[data.length-1];
+  var el = document.getElementById('btcPriceMain');
   if (el && last) el.textContent = '$' + last.close.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
   // Show returns
   if (data.length > 1) {
-    const first = data[0];
-    const ret = ((last.close - first.close) / first.close * 100).toFixed(2);
-    const retEl = document.getElementById('btcReturns');
+    var first = data[0];
+    var ret = ((last.close - first.close) / first.close * 100).toFixed(2);
+    var retEl = document.getElementById('btcReturns');
     if (retEl) {
       retEl.textContent = (ret >= 0 ? '+' : '') + ret + '%';
       retEl.style.color = ret >= 0 ? 'var(--green)' : 'var(--red)';
@@ -2098,56 +2098,133 @@ async function loadRegimeCurrent() {
     (data.captured_ct ? '<div class="dim" style="font-size:10px;margin-top:2px">' + data.captured_ct + '</div>' : '');
 }
 
-// ── Simple canvas line chart utility ──
+// ── Canvas line chart utility with gradient fill ──
 function drawLineChart(canvasId, points, color) {
-  const canvas = document.getElementById(canvasId);
+  var canvas = document.getElementById(canvasId);
   if (!canvas || !points.length) return;
-  const ctx = canvas.getContext('2d');
-  const dpr = window.devicePixelRatio || 1;
-  const rect = canvas.getBoundingClientRect();
+  var ctx = canvas.getContext('2d');
+  var dpr = window.devicePixelRatio || 1;
+  var rect = canvas.getBoundingClientRect();
   canvas.width = rect.width * dpr;
   canvas.height = rect.height * dpr;
   ctx.scale(dpr, dpr);
-  const w = rect.width, h = rect.height;
+  var w = rect.width, h = rect.height;
+  var pad = {t: 6, b: 6, l: 4, r: 4};
   ctx.clearRect(0, 0, w, h);
-  const vals = points.map(p => p.y);
-  const mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals);
-  const range = mx - mn || 1;
-  const pad = 4;
-  ctx.beginPath();
+  var vals = points.map(function(p) { return p.y; });
+  var mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals);
+  var range = mx - mn || 1;
   // Resolve CSS variable color
-  const tmp = document.createElement('span');
+  var tmp = document.createElement('span');
   tmp.style.color = color;
   document.body.appendChild(tmp);
-  const resolved = getComputedStyle(tmp).color;
+  var resolved = getComputedStyle(tmp).color;
   document.body.removeChild(tmp);
+
+  var toX = function(i) { return pad.l + (i / Math.max(1, points.length - 1)) * (w - pad.l - pad.r); };
+  var toY = function(v) { return pad.t + (1 - (v - mn) / range) * (h - pad.t - pad.b); };
+
+  // Grid lines
+  ctx.strokeStyle = 'rgba(48,54,61,0.4)';
+  ctx.lineWidth = 0.5;
+  for (var g = 0; g < 3; g++) {
+    var gy = pad.t + (g / 2) * (h - pad.t - pad.b);
+    ctx.beginPath(); ctx.moveTo(pad.l, gy); ctx.lineTo(w - pad.r, gy); ctx.stroke();
+  }
+
+  // Line
+  ctx.beginPath();
   ctx.strokeStyle = resolved;
   ctx.lineWidth = 1.5;
-  points.forEach((p, i) => {
-    const x = pad + (i / (points.length - 1)) * (w - 2*pad);
-    const y = h - pad - ((p.y - mn) / range) * (h - 2*pad);
+  points.forEach(function(p, i) {
+    var x = toX(i);
+    var y = toY(p.y);
     if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   });
   ctx.stroke();
+
+  // Gradient fill under the line
+  var lastPt = points[points.length - 1];
+  ctx.lineTo(toX(points.length - 1), h - pad.b);
+  ctx.lineTo(toX(0), h - pad.b);
+  ctx.closePath();
+  var grad = ctx.createLinearGradient(0, pad.t, 0, h - pad.b);
+  grad.addColorStop(0, resolved.replace('rgb', 'rgba').replace(')', ',0.15)'));
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Current value dashed line
+  if (lastPt) {
+    ctx.setLineDash([3, 3]);
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(pad.l, toY(lastPt.y));
+    ctx.lineTo(w - pad.r, toY(lastPt.y));
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
 }
 
 // ── System stats ──
 async function loadSystemStats() {
-  const stats = await api('/api/system_stats');
+  var stats = await api('/api/system_stats');
   if (!stats) return;
-  const el = document.getElementById('srvStats');
+  var el = document.getElementById('srvStats');
+  var upEl = document.getElementById('srvUptime');
   if (!el) return;
-  let html = '';
-  if (stats.cpu) html += '<div style="display:flex;justify-content:space-between;padding:3px 0"><span class="dim">CPU</span><span>' + stats.cpu.pct + '%</span></div>';
-  if (stats.memory) html += '<div style="display:flex;justify-content:space-between;padding:3px 0"><span class="dim">Memory</span><span>' + stats.memory.pct + '% (' + stats.memory.used_mb + 'MB)</span></div>';
-  if (stats.disk) html += '<div style="display:flex;justify-content:space-between;padding:3px 0"><span class="dim">Disk</span><span>' + stats.disk.pct + '% (' + stats.disk.used_gb + '/' + stats.disk.total_gb + 'GB)</span></div>';
-  if (stats.disk && stats.disk.db_mb) html += '<div style="display:flex;justify-content:space-between;padding:3px 0"><span class="dim">Database</span><span>' + stats.disk.db_mb + ' MB</span></div>';
-  if (stats.network) html += '<div style="display:flex;justify-content:space-between;padding:3px 0"><span class="dim">Network</span><span>' + stats.network.rx_kbps + '/' + stats.network.tx_kbps + ' KB/s</span></div>';
-  if (stats.uptime) {
-    const up = el.closest('.settings-card').querySelector('#srvUptime');
-    if (up) up.textContent = stats.uptime.display;
+
+  var html = '';
+
+  // Helper: progress bar with color thresholds
+  function bar(pct, label, detail, color) {
+    var c = pct > 90 ? 'var(--red)' : pct > 75 ? 'var(--orange)' : (color || 'var(--blue)');
+    return '<div style="margin-bottom:10px">' +
+      '<div style="display:flex;justify-content:space-between;margin-bottom:3px">' +
+      '<span style="font-weight:500">' + label + '</span>' +
+      '<span class="dim">' + detail + '</span>' +
+      '</div>' +
+      '<div style="background:var(--bg);border-radius:4px;height:6px;overflow:hidden">' +
+      '<div style="background:' + c + ';height:100%;width:' + Math.min(pct,100) + '%;border-radius:4px;transition:width 0.3s"></div>' +
+      '</div></div>';
   }
+
+  // Disk
+  if (stats.disk) {
+    var d = stats.disk;
+    var detail = d.used_gb + '/' + d.total_gb + ' GB';
+    if (d.db_mb !== undefined) detail += ' \u00b7 DB ' + d.db_mb + 'MB';
+    html += bar(d.pct, 'Disk', detail);
+  }
+
+  // Memory
+  if (stats.memory) {
+    var m = stats.memory;
+    html += bar(m.pct, 'Memory', m.used_mb + '/' + m.total_mb + ' MB');
+  }
+
+  // CPU
+  if (stats.cpu) {
+    var c = stats.cpu;
+    html += bar(c.pct, 'CPU', c.pct + '% \u00b7 Load ' + c.load_1m + '/' + c.load_5m + '/' + c.load_15m);
+  }
+
+  // Network
+  if (stats.network) {
+    var n = stats.network;
+    html += '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--dim)">' +
+      '<span>\u2193 ' + n.rx_kbps + ' KB/s \u00b7 ' + n.rx_total_gb + ' GB total</span>' +
+      '<span>\u2191 ' + n.tx_kbps + ' KB/s \u00b7 ' + n.tx_total_gb + ' GB total</span>' +
+      '</div>';
+  }
+
   el.innerHTML = html || '<div class="dim" style="text-align:center;padding:8px">No data</div>';
+
+  // Uptime
+  if (upEl && stats.uptime) {
+    upEl.textContent = 'uptime ' + stats.uptime.display;
+  }
 }
 
 // ── Service status & control ──

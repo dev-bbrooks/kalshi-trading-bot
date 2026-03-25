@@ -2333,8 +2333,7 @@ function statsNavTo(page) {
   if (sub) sub.style.display = '';
   var titles = {
     performance: 'Performance', conditions: 'Market Conditions', regimes: 'Regime Analysis',
-    observatory: 'Observatory', models: 'Models & Calibration',
-    validation: 'Validation & Execution', shadow: 'Shadow Trading', convergence: 'Data Convergence'
+    shadow: 'Shadow Trading'
   };
   var titleEl = document.getElementById('statsSubTitle');
   if (titleEl) titleEl.textContent = titles[page] || page;
@@ -2449,8 +2448,14 @@ function _statsExportCsv() {
 
 // ── Live Chart Drawing ──
 function drawLiveMarketChart(canvasId) {
+  var buf = _livePriceBuf;
   var canvas = document.getElementById(canvasId);
-  if (!canvas || !_livePriceBuf.data.length) return;
+  if (!canvas || buf.data.length < 2) {
+    if (canvas) canvas.style.display = 'none';
+    return;
+  }
+  canvas.style.display = '';
+
   var ctx = canvas.getContext('2d');
   var rect = canvas.getBoundingClientRect();
   if (rect.width === 0) return;
@@ -2459,56 +2464,103 @@ function drawLiveMarketChart(canvasId) {
   canvas.height = rect.height * dpr;
   ctx.scale(dpr, dpr);
   var W = rect.width, H = rect.height;
-  var pad = {t:8, b:20, l:4, r:4};
+  var pad = {t: 10, b: 16, l: 4, r: 4};
+
+  var data = buf.data;
+  // Use cheaper side (lower ask = cheaper to buy)
+  var bids = data.map(function(d) { return Math.min(d.ya || 99, d.na || 99); });
+
+  var yMin = Math.min.apply(null, bids) - 2;
+  var yMax = Math.max.apply(null, bids) + 2;
+  if (yMax - yMin < 6) { yMin -= 3; yMax += 3; }
+
+  // Time range: use full 15-min market window if close time available
+  var endMs = buf.closeTime ? new Date(buf.closeTime).getTime() : data[data.length - 1].ts;
+  var startMs = buf.closeTime ? endMs - 15 * 60 * 1000 : data[0].ts;
+  if (endMs <= startMs) endMs = data[data.length - 1].ts;
+  if (startMs >= endMs) startMs = data[0].ts;
+  var totalMs = endMs - startMs || 1;
+
+  var toX = function(ms) { return pad.l + ((ms - startMs) / totalMs) * (W - pad.l - pad.r); };
+  var toY = function(v) { return pad.t + (1 - (v - yMin) / (yMax - yMin)) * (H - pad.t - pad.b); };
+
   ctx.clearRect(0, 0, W, H);
-  var prices = _livePriceBuf.data;
-  var yesVals = prices.map(function(p) { return p.ya || 50; });
-  var noVals = prices.map(function(p) { return p.na || 50; });
-  var allVals = yesVals.concat(noVals);
-  var mn = Math.min.apply(null, allVals) - 2;
-  var mx = Math.max.apply(null, allVals) + 2;
-  var range = mx - mn || 1;
-  var toX = function(i) { return pad.l + (i / Math.max(1, prices.length - 1)) * (W - pad.l - pad.r); };
-  var toY = function(v) { return pad.t + (1 - (v - mn) / range) * (H - pad.t - pad.b); };
-  // 50 cent line
-  if (mn < 50 && mx > 50) {
-    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4,4]);
-    ctx.beginPath(); ctx.moveTo(pad.l, toY(50)); ctx.lineTo(W-pad.r, toY(50)); ctx.stroke();
-    ctx.setLineDash([]);
+
+  // Time gridlines
+  ctx.strokeStyle = 'rgba(48,54,61,0.5)';
+  ctx.setLineDash([2, 3]);
+  ctx.lineWidth = 0.5;
+  ctx.font = '9px sans-serif';
+  ctx.fillStyle = 'rgba(139,148,158,0.4)';
+  var spanMin = totalMs / 60000;
+  var step = spanMin > 10 ? 5 : spanMin > 4 ? 2 : 1;
+  for (var m = step; m < spanMin; m += step) {
+    var gx = toX(startMs + m * 60000);
+    if (gx > pad.l + 10 && gx < W - pad.r - 10) {
+      ctx.beginPath(); ctx.moveTo(gx, pad.t); ctx.lineTo(gx, H - pad.b); ctx.stroke();
+      ctx.fillText(m + 'm', gx - 6, H - 3);
+    }
   }
-  // YES line (green)
-  ctx.beginPath();
-  ctx.strokeStyle = '#3fb950';
+  ctx.setLineDash([]);
+
+  // "Now" marker
+  var nowMs = Date.now();
+  if (nowMs > startMs && nowMs < endMs) {
+    var nx = toX(nowMs);
+    ctx.strokeStyle = 'rgba(139,148,158,0.15)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(nx, pad.t); ctx.lineTo(nx, H - pad.b); ctx.stroke();
+  }
+
+  // 25c grid lines
+  for (var g = 0; g <= 100; g += 25) {
+    if (g > yMin && g < yMax) {
+      ctx.strokeStyle = 'rgba(48,54,61,0.3)';
+      ctx.lineWidth = 0.5;
+      ctx.beginPath(); ctx.moveTo(pad.l, toY(g)); ctx.lineTo(W - pad.r, toY(g)); ctx.stroke();
+      ctx.fillStyle = 'rgba(139,148,158,0.3)';
+      ctx.font = '8px monospace';
+      ctx.fillText(g + '', 2, toY(g) + 3);
+    }
+  }
+
+  // Price line (cheaper side)
+  var lastBid = bids[bids.length - 1];
+  var firstBid = bids[0];
+  var lineColor = lastBid >= firstBid ? '#3fb950' : '#f85149';
+
+  ctx.strokeStyle = lineColor;
   ctx.lineWidth = 1.5;
-  for (var i = 0; i < prices.length; i++) {
-    var x = toX(i), y = toY(yesVals[i]);
+  ctx.beginPath();
+  for (var i = 0; i < data.length; i++) {
+    var x = toX(data[i].ts);
+    var y = toY(bids[i]);
     if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   }
   ctx.stroke();
-  // NO line (red)
+
+  // Fill under
+  var lastX = toX(data[data.length - 1].ts);
+  var lastY = toY(lastBid);
+  ctx.lineTo(lastX, H - pad.b);
+  ctx.lineTo(toX(data[0].ts), H - pad.b);
+  ctx.closePath();
+  ctx.fillStyle = lastBid >= firstBid ? 'rgba(63,185,80,0.06)' : 'rgba(248,81,73,0.06)';
+  ctx.fill();
+
+  // Current price dot + label
   ctx.beginPath();
-  ctx.strokeStyle = '#f85149';
-  ctx.lineWidth = 1.5;
-  for (var j = 0; j < prices.length; j++) {
-    var x2 = toX(j), y2 = toY(noVals[j]);
-    if (j === 0) ctx.moveTo(x2, y2); else ctx.lineTo(x2, y2);
-  }
-  ctx.stroke();
-  // Labels
-  ctx.font = '9px monospace';
-  if (prices.length > 0) {
-    var lastYes = yesVals[yesVals.length-1];
-    var lastNo = noVals[noVals.length-1];
-    ctx.fillStyle = '#3fb950';
-    ctx.fillText('Y ' + lastYes + '\u00a2', W - pad.r - 38, toY(lastYes) - 2);
-    ctx.fillStyle = '#f85149';
-    ctx.fillText('N ' + lastNo + '\u00a2', W - pad.r - 38, toY(lastNo) + 10);
-  }
+  ctx.arc(lastX, lastY, 3, 0, Math.PI * 2);
+  ctx.fillStyle = lineColor;
+  ctx.fill();
+  ctx.font = '10px monospace';
+  ctx.fillStyle = lineColor;
+  var labelX = lastX > W - 40 ? lastX - 30 : lastX + 5;
+  ctx.fillText(lastBid + '\u00a2', labelX, lastY - 6);
+
   // Time label
-  if (_livePriceBuf.closeTime) {
-    var closeMs = new Date(_livePriceBuf.closeTime).getTime();
+  if (buf.closeTime) {
+    var closeMs = new Date(buf.closeTime).getTime();
     var diff = Math.max(0, (closeMs - Date.now()) / 1000);
     var labelEl = document.getElementById(canvasId + 'Label');
     if (labelEl) labelEl.textContent = fmtMmSs(diff) + ' left';
@@ -2543,6 +2595,8 @@ async function loadLivePriceHistory(force) {
 
 // ── BTC Chart ──
 var _btcChartRange = 60;
+var _btcChartData = null;
+
 async function loadBtcChart(minutes, btn) {
   if (minutes) _btcChartRange = minutes;
   if (btn) {
@@ -2552,46 +2606,103 @@ async function loadBtcChart(minutes, btn) {
   try {
     var data = await api('/api/regime/candles?minutes=' + _btcChartRange);
     if (!data || !data.length) return;
-    // Update BTC price display
-    var last = data[data.length - 1];
+    _btcChartData = data;
+
+    // Update price header
+    var latest = data[data.length - 1];
+    var first = data[0];
+    var price = latest.close;
+    var change = price - first.close;
+    var cls = change >= 0 ? 'pos' : 'neg';
+
     var btcEl = document.getElementById('btcPriceMain');
-    if (btcEl && last.close) btcEl.textContent = '$' + Math.round(last.close).toLocaleString();
-    // Draw chart
-    var canvas = document.getElementById('btcChart');
-    if (!canvas) return;
-    var ctx = canvas.getContext('2d');
-    var rect = canvas.getBoundingClientRect();
-    if (rect.width === 0) return;
-    var dpr = window.devicePixelRatio || 1;
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
-    ctx.scale(dpr, dpr);
-    var W = rect.width, H = rect.height;
-    var pad = {t:8, b:14, l:4, r:4};
-    ctx.clearRect(0, 0, W, H);
-    var closes = data.map(function(c) { return c.close; });
-    var mn = Math.min.apply(null, closes) * 0.9999;
-    var mx = Math.max.apply(null, closes) * 1.0001;
-    var range = mx - mn || 1;
-    var first = closes[0];
-    var lastC = closes[closes.length-1];
-    var lineColor = lastC >= first ? '#3fb950' : '#f85149';
-    ctx.beginPath();
-    ctx.strokeStyle = lineColor;
-    ctx.lineWidth = 1.5;
-    for (var i = 0; i < closes.length; i++) {
-      var x = pad.l + (i / (closes.length - 1)) * (W - pad.l - pad.r);
-      var y = pad.t + (1 - (closes[i] - mn) / range) * (H - pad.t - pad.b);
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    if (btcEl) {
+      btcEl.textContent = '$' + Math.round(price).toLocaleString();
+      btcEl.className = cls;
     }
-    ctx.stroke();
-    // Label
-    var labelEl = document.getElementById('btcChartLabel');
-    if (labelEl) {
-      var change = ((lastC - first) / first * 100);
-      labelEl.innerHTML = '$' + Math.round(lastC).toLocaleString() + ' <span style="color:' + lineColor + '">' + (change >= 0 ? '+' : '') + change.toFixed(2) + '%</span>';
-    }
+
+    drawBtcChart();
   } catch(e) { console.error('BTC chart error:', e); }
+}
+
+function drawBtcChart() {
+  var data = _btcChartData;
+  if (!data || data.length < 2) return;
+
+  var canvas = document.getElementById('btcChart');
+  if (!canvas || canvas.offsetWidth === 0) return;
+
+  var ctx = canvas.getContext('2d');
+  var dpr = window.devicePixelRatio || 1;
+  var W = canvas.offsetWidth;
+  var H = 160;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.height = H + 'px';
+  ctx.scale(dpr, dpr);
+
+  var pad = {t: 10, b: 16, l: 4, r: 4};
+  var closes = data.map(function(d) { return d.close; });
+  var yMin = Math.min.apply(null, closes) * 0.9999;
+  var yMax = Math.max.apply(null, closes) * 1.0001;
+  var range = yMax - yMin || 1;
+
+  var toX = function(i) { return pad.l + (i / (closes.length - 1)) * (W - pad.l - pad.r); };
+  var toY = function(v) { return pad.t + (1 - (v - yMin) / range) * (H - pad.t - pad.b); };
+
+  ctx.clearRect(0, 0, W, H);
+
+  // Grid lines
+  ctx.strokeStyle = 'rgba(48,54,61,0.4)';
+  ctx.lineWidth = 0.5;
+  for (var g = 0; g < 4; g++) {
+    var gy = pad.t + (g / 3) * (H - pad.t - pad.b);
+    ctx.beginPath(); ctx.moveTo(pad.l, gy); ctx.lineTo(W - pad.r, gy); ctx.stroke();
+  }
+
+  // Gradient fill
+  var first = closes[0];
+  var last = closes[closes.length - 1];
+  var isUp = last >= first;
+  var lineColor = isUp ? 'rgba(63,185,80,0.9)' : 'rgba(248,81,73,0.9)';
+  var fillTop = isUp ? 'rgba(63,185,80,0.15)' : 'rgba(248,81,73,0.15)';
+
+  var grad = ctx.createLinearGradient(0, pad.t, 0, H - pad.b);
+  grad.addColorStop(0, fillTop);
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+
+  ctx.beginPath();
+  ctx.moveTo(toX(0), toY(closes[0]));
+  for (var i = 1; i < closes.length; i++) ctx.lineTo(toX(i), toY(closes[i]));
+  ctx.strokeStyle = lineColor;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // Fill under
+  ctx.lineTo(toX(closes.length - 1), H - pad.b);
+  ctx.lineTo(toX(0), H - pad.b);
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Current price dashed line
+  ctx.setLineDash([3, 3]);
+  ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(pad.l, toY(last));
+  ctx.lineTo(W - pad.r, toY(last));
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Price label
+  var changePct = ((last - first) / first * 100);
+  var sign = changePct >= 0 ? '+' : '';
+  var labelEl = document.getElementById('btcChartLabel');
+  if (labelEl) {
+    labelEl.textContent = '$' + Math.round(last).toLocaleString() + ' (' + sign + changePct.toFixed(2) + '%)';
+    labelEl.style.color = isUp ? 'var(--green)' : 'var(--red)';
+  }
 }
 
 // ── Config Load ──
@@ -2803,7 +2914,26 @@ async function showPushLog(filterTag) {
 async function loadRegimeWorkerStatus() {
   try {
     var s = await api('/api/btc_15m/regime_worker_status');
-    // Could update engine status section
+    var el = document.getElementById('regimeEngineContent');
+    if (!el || !s) return;
+    var html = '';
+    if (s.running) {
+      html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span class="status-dot dot-green"></span><span style="color:var(--green);font-weight:600;font-size:12px">Running</span></div>';
+    } else {
+      html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span class="status-dot dot-red"></span><span style="color:var(--red);font-weight:600;font-size:12px">Stopped</span></div>';
+    }
+    if (s.heartbeat) {
+      var hb = s.heartbeat;
+      if (hb.phase) html += '<div class="dim" style="font-size:11px">Phase: ' + escHtml(hb.phase) + '</div>';
+      if (hb.pid) html += '<div class="dim" style="font-size:11px">PID: ' + hb.pid + '</div>';
+      if (hb.last_beat) {
+        var age = Math.round((Date.now() - new Date(hb.last_beat).getTime()) / 1000);
+        var ageLabel = age < 60 ? age + 's ago' : Math.round(age/60) + 'm ago';
+        html += '<div class="dim" style="font-size:11px">Last beat: ' + ageLabel + '</div>';
+      }
+    }
+    if (!html) html = '<div class="dim">No heartbeat data</div>';
+    el.innerHTML = html;
   } catch(e) {}
 }
 
