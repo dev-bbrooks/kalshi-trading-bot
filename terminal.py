@@ -458,8 +458,17 @@ TERMINAL_HTML = r"""<!DOCTYPE html>
   .dot-disconnected { background: #f44; }
   .dot-connecting { background: #f90; animation: pulse 1s infinite; }
   @keyframes pulse { 50% { opacity: 0.4; } }
-  #terminal-wrap { flex: 1; min-height: 0; }
+  #terminal-wrap { flex: 1; min-height: 0; position: relative; }
   .xterm { height: 100%; }
+  #paste-btn {
+    position: absolute; bottom: 16px; right: 16px; z-index: 10;
+    width: 40px; height: 40px; border-radius: 50%; border: none;
+    background: rgba(255,255,255,0.1); color: #c9d1d9; font-size: 18px;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    backdrop-filter: blur(4px); transition: background 0.2s;
+  }
+  #paste-btn:hover { background: rgba(255,255,255,0.2); }
+  #paste-btn:active { background: rgba(255,255,255,0.3); }
 </style>
 </head>
 <body>
@@ -468,7 +477,9 @@ TERMINAL_HTML = r"""<!DOCTYPE html>
     <span><span id="status-dot" class="dot dot-connecting"></span><span id="status-text">Connecting…</span></span>
     <span id="status-info">trading-platform</span>
   </div>
-  <div id="terminal-wrap"></div>
+  <div id="terminal-wrap">
+    <button id="paste-btn" title="Paste from clipboard">&#x1F4CB;</button>
+  </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
@@ -575,6 +586,14 @@ TERMINAL_HTML = r"""<!DOCTYPE html>
     prompt: function(t) { socket.emit('claude_prompt', {text: t}); },
     stop: function() { socket.emit('claude_stop'); }
   };
+
+  document.getElementById('paste-btn').addEventListener('click', function() {
+    if (navigator.clipboard && navigator.clipboard.readText) {
+      navigator.clipboard.readText().then(function(text) {
+        if (text) { term.paste(text); }
+      }).catch(function() {});
+    }
+  });
 })();
 </script>
 </body>
