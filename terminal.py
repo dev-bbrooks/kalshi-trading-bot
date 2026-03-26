@@ -99,6 +99,9 @@ def ws_connect():
         disconnect()
         return
 
+@socketio.on("shell_start", namespace="/terminal/ws")
+def ws_shell_start():
+    """Spawn shell PTY on demand (when user switches to Shell tab)."""
     # Only one session at a time
     if _active_session["fd"] is not None:
         _cleanup_shell()
@@ -708,6 +711,8 @@ TERMINAL_HTML = r"""<!DOCTYPE html>
     if (shellInitialized) return;
     shellInitialized = true;
 
+    socket.emit('shell_start');
+
     term = new Terminal({
       cursorBlink: true, fontSize: 16,
       fontFamily: '"SF Mono", Menlo, Monaco, "Courier New", monospace',
@@ -744,16 +749,19 @@ TERMINAL_HTML = r"""<!DOCTYPE html>
   // Shell socket events
   socket.on('connect', function() {
     if (shellInitialized) {
+      // Re-spawn shell on reconnect
+      socket.emit('shell_start');
       var d = fitAddon.proposeDimensions();
       if (d) socket.emit('resize', {rows: d.rows, cols: d.cols});
     }
   });
   socket.on('output', function(data) { if (term) term.write(data); });
   socket.on('exit', function() {
-    if (term) term.write('\r\n\x1b[33m[shell exited — reconnecting...]\x1b[0m\r\n');
-    setTimeout(function() { socket.disconnect(); socket.connect(); }, 1000);
+    if (term) {
+      term.write('\r\n\x1b[33m[shell exited — restarting...]\x1b[0m\r\n');
+      setTimeout(function() { socket.emit('shell_start'); }, 1000);
+    }
   });
-  socket.on('reconnect', function() { if (term) term.clear(); });
 
   window.addEventListener('resize', function() {
     if (shellInitialized && currentTab === 'shell') {
