@@ -8757,6 +8757,8 @@ return `<div class="trade-card ${cardCls}" data-tid="${t.id}" role="button" styl
 }
 
 // ── Trade detail popup ───────────────────────────────────
+function _escHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/'/g,'&#39;'); }
+
 async function showTradeDetail(tradeId) {
   try {
     const d = await api(`/api/trade/${tradeId}/detail`);
@@ -8792,7 +8794,7 @@ async function showTradeDetail(tradeId) {
       if (o === 'error') {
         html += `<div style="padding:10px;border-radius:8px;background:#2a2010;border:1px solid #d29922;margin-bottom:10px">
           <div style="font-size:12px;font-weight:600;color:#d29922;margin-bottom:4px">Order Error</div>
-          <div style="font-size:11px;color:var(--text);word-break:break-word">${escHtml(t.skip_reason||'Unknown error')}</div>
+          <div style="font-size:11px;color:var(--text);word-break:break-word">${_escHtml(t.skip_reason||'Unknown error')}</div>
         </div>`;
       }
 
@@ -8808,7 +8810,7 @@ async function showTradeDetail(tradeId) {
       }
 
       html += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:3px 12px;font-size:12px;color:var(--dim)">
-        <div style="grid-column:1/-1">Reason: <strong>${escHtml(t.skip_reason||'—')}</strong></div>
+        <div style="grid-column:1/-1">Reason: <strong>${_escHtml(t.skip_reason||'—')}</strong></div>
         <div>Vol Level: <strong>${t.vol_regime ? t.vol_regime + '/5' : '—'}</strong></div>
         <div>Trend: <strong>${t.trend_regime != null ? (t.trend_regime > 0 ? '+' : '') + t.trend_regime : '—'}</strong></div>
         <div>Spread: <strong>${t.spread_at_entry_c != null ? t.spread_at_entry_c + '¢' : '—'}</strong></div>
@@ -8861,7 +8863,7 @@ async function showTradeDetail(tradeId) {
 
     html += `<div style="margin-top:6px;font-size:11px;color:var(--dim)">
       Market: ${t.market_ct || '—'} · Traded: ${t.created_ct || '—'}
-      ${t.notes ? '<br>Notes: ' + escHtml(t.notes) : ''}
+      ${t.notes ? '<br>Notes: ' + _escHtml(t.notes) : ''}
     </div>`;
 
     el.innerHTML = html;
