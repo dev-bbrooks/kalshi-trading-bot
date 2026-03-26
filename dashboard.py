@@ -4342,18 +4342,21 @@ MAIN_HTML = r"""<!DOCTYPE html>
   .dot-purple { background: #a371f7; box-shadow: 0 0 6px rgba(163,113,247,0.5); }
   /* ── Mode Selector Strip ── */
   .mode-strip { display: flex; gap: 4px; margin-top: 8px; }
-  .mode-btn { flex: 1; padding: 5px 2px 4px; border: 1px solid var(--border); border-radius: 6px;
+  .mode-btn { flex: 1; padding: 6px 2px 5px; border: 1px solid var(--border); border-radius: 6px;
     background: var(--card); cursor: pointer; text-align: center; font-size: 10px;
     font-weight: 600; color: var(--dim); letter-spacing: 0.3px; transition: all 0.15s;
-    -webkit-tap-highlight-color: transparent; line-height: 1.2; }
+    -webkit-tap-highlight-color: transparent; line-height: 1.2; min-height: 44px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; }
   .mode-btn:active { filter: brightness(1.2); }
-  .mode-btn .mode-icon { font-size: 11px; display: block; margin-bottom: 1px; opacity: 0.7; }
+  .mode-btn .mode-icon { display: block; margin-bottom: 2px; opacity: 0.7; line-height: 0; }
+  .mode-btn .mode-icon svg { width: 16px; height: 16px; }
   .mode-btn.m-active-observe { background: rgba(88,166,255,0.12); color: var(--blue);
     border-color: rgba(88,166,255,0.4); }
   .mode-btn.m-active-shadow { background: rgba(163,113,247,0.12); color: #a371f7;
     border-color: rgba(163,113,247,0.4); }
-  .mode-btn.m-active-hybrid { background: rgba(88,166,255,0.12); color: var(--blue);
-    border-color: rgba(88,166,255,0.4); }
+  .mode-btn.m-active-hybrid { background: rgba(45,212,191,0.12); color: #2dd4bf;
+    border-color: rgba(45,212,191,0.4); }
+  .mode-btn.m-staged { opacity: 0.6; border-style: dashed; background: transparent; }
   .mode-btn.m-active-auto { background: rgba(63,185,80,0.12); color: var(--green);
     border-color: rgba(63,185,80,0.4); }
   .mode-btn.m-active-manual { background: rgba(248,81,73,0.08); color: var(--text);
@@ -4373,6 +4376,18 @@ MAIN_HTML = r"""<!DOCTYPE html>
   @keyframes live-pulse-purple {
     0%,100% { box-shadow: 0 0 4px #a371f7; opacity: 1; }
     50% { box-shadow: 0 0 10px #a371f7, 0 0 18px rgba(163,113,247,0.4); opacity: 0.75; }
+  }
+  .dot-blue { background: var(--blue); box-shadow: 0 0 4px var(--blue), 0 0 8px rgba(88,166,255,0.3);
+              animation: live-pulse-blue 2s ease-in-out infinite; }
+  @keyframes live-pulse-blue {
+    0%,100% { box-shadow: 0 0 4px var(--blue); opacity: 1; }
+    50% { box-shadow: 0 0 10px var(--blue), 0 0 18px rgba(88,166,255,0.4); opacity: 0.75; }
+  }
+  .dot-teal { background: #2dd4bf; box-shadow: 0 0 4px #2dd4bf, 0 0 8px rgba(45,212,191,0.3);
+              animation: live-pulse-teal 2s ease-in-out infinite; }
+  @keyframes live-pulse-teal {
+    0%,100% { box-shadow: 0 0 4px #2dd4bf; opacity: 1; }
+    50% { box-shadow: 0 0 10px #2dd4bf, 0 0 18px rgba(45,212,191,0.4); opacity: 0.75; }
   }
   .bot-offline-banner {
     display: none; background: rgba(248,81,73,0.12); border-bottom: 1px solid var(--red);
@@ -4834,15 +4849,15 @@ MAIN_HTML = r"""<!DOCTYPE html>
   <!-- Mode Selector Strip -->
   <div class="mode-strip" id="modeStrip">
     <div class="mode-btn" data-mode="observe" onclick="setTradingMode('observe')">
-      <span class="mode-icon">◉</span>Observe</div>
+      <span class="mode-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg></span>Observe</div>
     <div class="mode-btn" data-mode="shadow" onclick="setTradingMode('shadow')">
-      <span class="mode-icon">◈</span>Shadow</div>
+      <span class="mode-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2C8 2 5 6 5 11c0 3 1 5 2 6.5S9 20 9 22h6c0-2 1-3 2-4.5S19 14 19 11c0-5-3-9-7-9z"/><circle cx="10" cy="11" r="1"/><circle cx="14" cy="11" r="1"/></svg></span>Shadow</div>
     <div class="mode-btn" data-mode="hybrid" onclick="setTradingMode('hybrid')">
-      <span class="mode-icon">⬡</span>Hybrid</div>
+      <span class="mode-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/></svg></span>Hybrid</div>
     <div class="mode-btn" data-mode="auto" onclick="setTradingMode('auto')">
-      <span class="mode-icon">◎</span>Auto</div>
+      <span class="mode-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg></span>Auto</div>
     <div class="mode-btn" data-mode="manual" onclick="setTradingMode('manual')">
-      <span class="mode-icon">▣</span>Manual</div>
+      <span class="mode-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 8V6a2 2 0 00-4 0v1M14 8V5a2 2 0 00-4 0v3M10 8V4a2 2 0 00-4 0v9l-1.8-1.8a2 2 0 00-2.8 2.8L7 20.5A6 6 0 0012 23h3a6 6 0 006-6v-5a2 2 0 00-4 0v-1a2 2 0 00-4 0v-3z"/></svg></span>Manual</div>
   </div>
 </div>
 <div class="bot-offline-banner" id="offlineBanner">
@@ -6976,43 +6991,77 @@ function toggleObserveOnly(on, skipSave) {
 const MODE_META = {
   observe: { label: 'Observe', color: 'var(--blue)', toast: 'Observe mode — recording data', autoStart: true },
   shadow:  { label: 'Shadow',  color: '#a371f7',       toast: 'Shadow mode — 1-contract trades', autoStart: true },
-  hybrid:  { label: 'Hybrid',  color: 'var(--blue)',    toast: 'Hybrid mode — auto + shadow fallback', autoStart: true },
+  hybrid:  { label: 'Hybrid',  color: '#2dd4bf',         toast: 'Hybrid mode — auto + shadow fallback', autoStart: true },
   auto:    { label: 'Auto',    color: 'var(--green)',   toast: 'Auto mode — full trades only', autoStart: false },
   manual:  { label: 'Manual',  color: 'var(--text)',    toast: 'Manual mode — picker strategy', autoStart: false },
 };
 
-function _syncModeStrip(mode) {
+var _stagedMode = null;
+
+function _syncModeStrip(activeMode) {
+  const staged = _stagedMode;
   document.querySelectorAll('#modeStrip .mode-btn').forEach(b => {
     const m = b.dataset.mode;
-    b.className = 'mode-btn' + (m === mode ? ` m-active-${m}` : '');
+    if (m === activeMode) {
+      b.className = 'mode-btn m-active-' + m;
+    } else if (m === staged) {
+      b.className = 'mode-btn m-active-' + m + ' m-staged';
+    } else {
+      b.className = 'mode-btn';
+    }
   });
   // Update settings page display
   const sd = document.getElementById('settingsModeDisplay');
   if (sd) {
-    const meta = MODE_META[mode] || MODE_META.observe;
-    sd.innerHTML = `Current: <strong style="color:${meta.color}">${meta.label}</strong>`;
+    const meta = MODE_META[activeMode] || MODE_META.observe;
+    let label = `Current: <strong style="color:${meta.color}">${meta.label}</strong>`;
+    if (staged && staged !== activeMode) {
+      const sm = MODE_META[staged] || {};
+      label += ` <span style="color:var(--dim)">→</span> <strong style="color:${sm.color};opacity:0.6">${sm.label}</strong>`;
+    }
+    sd.innerHTML = label;
   }
 }
 
 async function setTradingMode(mode) {
   if (!MODE_META[mode]) return;
   const meta = MODE_META[mode];
-  // Save trading_mode (backend derives legacy booleans)
-  await saveSetting('trading_mode', mode);
-  _uiState.trading_mode = mode;
-  // Derive observe_only locally for immediate UI update
-  _uiState.observe_only = (mode === 'observe' || mode === 'shadow');
-  _syncModeStrip(mode);
-  // Auto-start in data-collecting modes if not already running
-  if (meta.autoStart && !_uiState.auto_trading) {
-    cmd('start', {mode: 'continuous', count: 0});
+  const midMarket = !!((_uiState.live_market || {}).ticker);
+
+  if (!midMarket) {
+    // Between markets — apply immediately, clear staged
+    _stagedMode = null;
+    _syncModeStrip(mode);
+    await saveSetting('trading_mode', mode);
+    _uiState.trading_mode = mode;
+    _uiState.observe_only = (mode === 'observe' || mode === 'shadow');
+    if (meta.autoStart && !_uiState.auto_trading) {
+      cmd('start', {mode: 'continuous', count: 0});
+    }
+    _updateAutoStrategyLock();
+    const toastColor = mode === 'observe' ? 'blue' : mode === 'shadow' ? 'purple' :
+                       mode === 'hybrid' ? 'teal' : mode === 'auto' ? 'green' : 'yellow';
+    showToast(meta.toast, toastColor);
+    setTimeout(pollState, 800);
+  } else {
+    // Mid-market
+    const currentMode = _uiState.trading_mode || 'observe';
+    if (mode === currentMode && !_stagedMode) return;
+    if (mode === _stagedMode) {
+      // De-stage — revert to current mode
+      _stagedMode = null;
+      saveSetting('trading_mode', currentMode);
+      _syncModeStrip(currentMode);
+      showToast('Cancelled — staying on ' + (MODE_META[currentMode]||{}).label, 'blue');
+      return;
+    }
+    // Stage the new mode
+    _stagedMode = mode;
+    saveSetting('trading_mode', mode);
+    _syncModeStrip(currentMode);
+    showToast(meta.label + ' queued for next market', mode === 'shadow' ? 'purple' :
+              mode === 'hybrid' ? 'teal' : mode === 'auto' ? 'green' : 'blue');
   }
-  // Update strategy picker lock state
-  _updateAutoStrategyLock();
-  const toastColor = mode === 'observe' ? 'blue' : mode === 'shadow' ? 'purple' :
-                     mode === 'hybrid' ? 'blue' : mode === 'auto' ? 'green' : 'yellow';
-  showToast(meta.toast, toastColor);
-  setTimeout(pollState, 800);
 }
 
 async function svcControl(action, service) {
@@ -7309,6 +7358,7 @@ function showToast(msg, color) {
     blue:   {bg: 'rgba(88,166,255,0.12)',  border: 'rgba(88,166,255,0.4)', fg: 'var(--blue)'},
     orange: {bg: 'rgba(240,136,62,0.12)',  border: 'rgba(240,136,62,0.4)', fg: 'var(--orange)'},
     purple: {bg: 'rgba(163,113,247,0.12)', border: 'rgba(163,113,247,0.4)', fg: '#a371f7'},
+    teal:   {bg: 'rgba(45,212,191,0.12)',  border: 'rgba(45,212,191,0.4)',  fg: '#2dd4bf'},
   };
   const c = colors[color] || colors.green;
   t.style.background = c.bg;
@@ -7434,8 +7484,8 @@ function renderUI(s) {
       }
     }
 
-    const _modeColors = {observe:'var(--blue)',shadow:'#a371f7',hybrid:'var(--blue)',auto:'var(--green)',manual:'var(--text)'};
-    const _modeDots = {observe:'dot-blue',shadow:'dot-purple',hybrid:'dot-blue',auto:'dot-green',manual:'dot-yellow'};
+    const _modeColors = {observe:'var(--blue)',shadow:'#a371f7',hybrid:'#2dd4bf',auto:'var(--green)',manual:'var(--text)'};
+    const _modeDots = {observe:'dot-blue',shadow:'dot-purple',hybrid:'dot-teal',auto:'dot-green',manual:'dot-yellow'};
     const _modeLabels = {observe:'Observing',shadow:'Shadow',hybrid:'Hybrid',auto:'Auto',manual:'Manual'};
 
     if (_botStale) {
@@ -7464,6 +7514,9 @@ function renderUI(s) {
           var _ctM = Math.floor(_ctMs / 60000);
           var _ctS = Math.floor((_ctMs % 60000) / 1000);
           statusMain += ' \u00b7 ' + _ctM + ':' + (_ctS < 10 ? '0' : '') + _ctS;
+          if (_stagedMode && _stagedMode !== tradingMode) {
+            statusMain += ' \u2192 ' + (_modeLabels[_stagedMode] || _stagedMode);
+          }
         }
       }
     }
@@ -7769,6 +7822,8 @@ function renderUI(s) {
           lastStateData._monCloseTime = lm.close_time;
           // Only arm timer if this is a genuinely new market, not stale data re-populating
           lastStateData._monEndFired = (lastStateData._monFiredForClose === lm.close_time);
+          // Clear staged mode — new market means the staged mode has taken effect
+          if (_stagedMode) { _stagedMode = null; _syncModeStrip(tradingMode); }
         }
         tickCountdown('monTime', lm.close_time);
 
