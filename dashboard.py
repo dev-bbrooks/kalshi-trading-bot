@@ -4432,7 +4432,8 @@ MAIN_HTML = r"""<!DOCTYPE html>
     font-size: 12px; color: var(--dim); }
   .regime-detail-grid .rdg-val { color: var(--text); font-weight: 600; }
   .trade-card { background: var(--card); border: 1px solid var(--border); border-radius: 6px;
-                padding: 10px; margin-bottom: 8px; border-left: 3px solid var(--border); }
+                padding: 10px; margin-bottom: 8px; border-left: 3px solid var(--border);
+                -webkit-tap-highlight-color: rgba(88,166,255,0.15); }
   .trade-card.tc-win { border-left-color: var(--green); }
   .trade-card.tc-loss { border-left-color: var(--red); }
   .trade-card.tc-skip { border-left-color: var(--blue); }
@@ -8586,6 +8587,14 @@ document.getElementById('contentWrap').addEventListener('scroll', function() {
   }
 });
 
+// Event delegation for trade card taps (more reliable than inline onclick on iOS)
+document.addEventListener('click', function(e) {
+  const card = e.target.closest('.trade-card[data-tid]');
+  if (card && !e.target.closest('[onclick*="stopPropagation"]') && !e.target.closest('.tc-tag')) {
+    showTradeDetail(parseInt(card.dataset.tid));
+  }
+});
+
 function renderTradeCard(t) {
 const o = t.outcome || 'unknown';
 const pnl = t.pnl || 0;
@@ -8716,7 +8725,7 @@ if (isReal) {
     </div>`;
 }
 
-return `<div class="trade-card ${cardCls}" onclick="showTradeDetail(${t.id})" style="cursor:pointer">
+return `<div class="trade-card ${cardCls}" data-tid="${t.id}" role="button" style="cursor:pointer">
   <div class="tc-header">
     <div>
       <span class="tc-outcome ${o === 'skipped' ? '' : pnlCls}" ${o === 'skipped' ? 'style="color:var(--blue)"' : ''}>${outLabel}</span>
