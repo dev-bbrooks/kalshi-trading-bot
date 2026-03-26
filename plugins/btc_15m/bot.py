@@ -655,7 +655,6 @@ def _place_shadow_trade(client, ticker, side, price_c,
             fill = client.poll_until_filled(order_id, 1, deadline, interval=3)
         else:
             client.cancel_order(order_id)
-            _update_state({"active_shadow": None})
             return None
 
         fill_count = fill.get("fill_count", 0) if fill else 0
@@ -667,7 +666,6 @@ def _place_shadow_trade(client, ticker, side, price_c,
                 client.cancel_order(order_id)
             except Exception:
                 pass
-            _update_state({"active_shadow": None})
             blog("DEBUG", f"Shadow trade: no fill on {ticker} {side}@{price_c}¢")
             return None
 
@@ -710,6 +708,14 @@ def _place_shadow_trade(client, ticker, side, price_c,
     except Exception as e:
         blog("DEBUG", f"Shadow trade failed: {e}")
         return None
+    finally:
+        # Guarantee pending_fill never persists — only clear if still pending
+        try:
+            _cur = _get_state().get("active_shadow")
+            if isinstance(_cur, dict) and _cur.get("status") == "pending_fill":
+                _update_state({"active_shadow": None})
+        except Exception:
+            pass
 
 
 # ═══════════════════════════════════════════════════════════════
