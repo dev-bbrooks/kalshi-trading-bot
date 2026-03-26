@@ -257,6 +257,7 @@ class ClaudeCodeSession:
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                stdin=subprocess.DEVNULL,
                 cwd="/opt/trading-platform",
                 env=env,
                 preexec_fn=_preexec,
