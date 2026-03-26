@@ -4588,7 +4588,8 @@ MAIN_HTML = r"""<!DOCTYPE html>
     transform:translateY(100%);transition:transform 0.3s cubic-bezier(0.4,0,0.2,1);
     -webkit-overflow-scrolling:touch;overscroll-behavior:contain; }
   .fs-panel.open { transform:translateY(0); }
-  .fs-handle { width:36px;height:4px;background:var(--dim);opacity:0.4;border-radius:2px;margin:12px auto 16px; }
+  .fs-handle { width:36px;height:4px;background:var(--dim);opacity:0.4;border-radius:2px;margin:0 auto;
+    padding:20px 0;background-clip:content-box;cursor:grab;-webkit-tap-highlight-color:transparent; }
   .fs-section { margin-bottom:16px; }
   .fs-section-hdr { display:flex;justify-content:space-between;align-items:center;margin-bottom:8px; }
   .fs-section-hdr h4 { font-size:11px;font-weight:700;color:var(--dim);letter-spacing:0.5px;text-transform:uppercase;margin:0; }
@@ -6103,7 +6104,7 @@ function fallbackCopy(text, resolve, reject) {
   document.addEventListener('touchstart', e => {
     const scroller = getScroller();
     const atTop = scroller ? scroller.scrollTop <= 0 : true;
-    if (atTop && e.touches.length === 1 && !isModalOpen() && !_chartTouchActive) {
+    if (atTop && e.touches.length === 1 && !isModalOpen() && !_chartTouchActive && _filterSheet.pos !== 'open') {
       startY = e.touches[0].clientY;
       pulling = true;
       triggered = false;
@@ -6112,7 +6113,7 @@ function fallbackCopy(text, resolve, reject) {
   }, {passive: true});
 
   document.addEventListener('touchmove', e => {
-    if (!pulling || isModalOpen() || _chartTouchActive) { pulling = false; return; }
+    if (!pulling || isModalOpen() || _chartTouchActive || _filterSheet.pos === 'open') { pulling = false; return; }
     const dy = Math.max(0, e.touches[0].clientY - startY);
     if (dy > showAfter) {
       bar.style.display = '';
@@ -6125,7 +6126,7 @@ function fallbackCopy(text, resolve, reject) {
   }, {passive: true});
 
   document.addEventListener('touchend', e => {
-    if (!pulling || isModalOpen() || _chartTouchActive) { pulling = false; return; }
+    if (!pulling || isModalOpen() || _chartTouchActive || _filterSheet.pos === 'open') { pulling = false; return; }
     pulling = false;
     const scroller = getScroller();
     const atTop = scroller ? scroller.scrollTop <= 0 : true;
@@ -8650,28 +8651,28 @@ function closeFilterSheet() {
   _filterSheet.pos = 'closed';
 }
 
-// Drag handle
+// Drag handle + sheet touch isolation
 (function() {
-  var startY = 0, dragging = false;
-  var handle = null;
+  var _dragStartY = 0, _isDragging = false;
   document.addEventListener('touchstart', function(e) {
-    handle = document.getElementById('filterSheetHandle');
-    if (!handle || !handle.contains(e.target)) { dragging = false; return; }
-    startY = e.touches[0].clientY;
-    dragging = true;
+    var handle = document.getElementById('filterSheetHandle');
+    if (!handle || !handle.contains(e.target)) { _isDragging = false; return; }
+    _dragStartY = e.touches[0].clientY;
+    _isDragging = true;
+    var panel = document.getElementById('filterSheetPanel');
+    panel.style.transition = 'none';
   }, {passive: true});
   document.addEventListener('touchmove', function(e) {
-    if (!dragging) return;
+    if (!_isDragging) return;
+    var dy = Math.max(0, e.touches[0].clientY - _dragStartY);
     var panel = document.getElementById('filterSheetPanel');
-    var dy = Math.max(0, e.touches[0].clientY - startY);
-    panel.style.transition = 'none';
     panel.style.transform = 'translateY(' + dy + 'px)';
   }, {passive: true});
   document.addEventListener('touchend', function(e) {
-    if (!dragging) return;
-    dragging = false;
+    if (!_isDragging) return;
+    _isDragging = false;
     var panel = document.getElementById('filterSheetPanel');
-    var dy = (e.changedTouches[0] || {}).clientY - startY;
+    var dy = (e.changedTouches[0] || {}).clientY - _dragStartY;
     panel.style.transition = '';
     if (dy > 200) {
       closeFilterSheet();
@@ -8680,6 +8681,18 @@ function closeFilterSheet() {
       panel.classList.add('open');
     }
   });
+  // Block overlay touchmove from propagating to page (Fix 3)
+  // Deferred — overlay element is in HTML below this script
+  setTimeout(function() {
+    var ov = document.getElementById('filterSheetOverlay');
+    if (ov) {
+      ov.addEventListener('touchmove', function(e) {
+        if (_filterSheet.pos === 'open' && e.target === ov) {
+          e.preventDefault();
+        }
+      }, {passive: false});
+    }
+  }, 0);
 })();
 
 function _renderFilterSheetContent() {
