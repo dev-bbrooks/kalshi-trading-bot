@@ -6648,11 +6648,21 @@ let _chartTouchActive = false;
     return null;
   }
 
+  var _crosshairSavedLabel = '';
+
   function showCrosshair(canvas, clientX) {
     const cm = canvas._chartMap;
     if (!cm) return;
     const interp = interpolateAt(canvas, clientX);
     if (!interp) return;
+
+    // Save label text before first drag update
+    const labelId = canvas.id + 'Label';
+    const label = document.getElementById(labelId);
+    if (label && !canvas._crosshairActive) {
+      _crosshairSavedLabel = label.textContent || '';
+      canvas._crosshairActive = true;
+    }
 
     const cx = cm.toX(interp.x);
     const cy = cm.toY(interp.val);
@@ -6677,8 +6687,6 @@ let _chartTouchActive = false;
     ctx.restore();
 
     // Label
-    const labelId = canvas.id + 'Label';
-    const label = document.getElementById(labelId);
     if (label && cm.formatLabel) {
       // Build a fake point for formatLabel
       const fakePoint = {ts: interp.x, x: interp.x, bid: interp.val, val: interp.val};
@@ -6689,10 +6697,12 @@ let _chartTouchActive = false;
 
   function clearCrosshair(canvas) {
     const cm = canvas._chartMap;
-    // Clear label first, then redraw — if redraw sets a default label, it persists
     const labelId = canvas.id + 'Label';
     const label = document.getElementById(labelId);
-    if (label) label.innerHTML = '';
+    // Restore label to pre-drag text
+    if (label) label.textContent = _crosshairSavedLabel;
+    _crosshairSavedLabel = '';
+    canvas._crosshairActive = false;
     if (cm && cm.redraw) cm.redraw();
   }
 
