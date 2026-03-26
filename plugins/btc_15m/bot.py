@@ -1679,6 +1679,8 @@ def _run_one_market(client: KalshiClient, cfg: dict) -> bool:
         except Exception:
             pass
 
+        # In observe/shadow/hybrid mode the regime gate is bypassed — skip_reason is not meaningful
+        _skip_reason = None if _trading_mode in ("observe", "shadow", "hybrid") else gate["reason"]
         skip_trade_id = insert_trade({
             **_ctx,
             "market_id": market_id,
@@ -1687,7 +1689,7 @@ def _run_one_market(client: KalshiClient, cfg: dict) -> bool:
             "side": initial_skip_side,
             "avg_fill_price_c": initial_skip_price,
             "outcome": "skipped",
-            "skip_reason": gate["reason"],
+            "skip_reason": _skip_reason,
             "cheaper_side": initial_skip_side if initial_skip_side != "n/a" else _ctx.get("cheaper_side"),
             "cheaper_side_price_c": initial_skip_price or _ctx.get("cheaper_side_price_c"),
         })

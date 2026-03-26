@@ -8649,7 +8649,7 @@ function _renderActiveTrade() {
       </div>
       <div style="margin-top:4px;font-size:12px;color:var(--dim)">${regime}${_skipObsN > 0 ? ` <span style="font-size:10px">n=${_skipObsN}</span>` : ''}</div>
       ${_drifted ? `<div style="margin-top:2px;font-size:10px;color:#d29922">now ${_nowRegime}</div>` : ''}
-      ${skip.auto_skip_short ? `<div style="margin-top:3px;font-size:10px;color:var(--blue)">Auto: ${skip.auto_skip_short}</div>` : `<div style="margin-top:2px;font-size:11px;color:var(--dim)">${reason}</div>`}
+      ${(state.trading_mode || 'observe') !== 'observe' ? (skip.auto_skip_short ? `<div style="margin-top:3px;font-size:10px;color:var(--blue)">Auto: ${skip.auto_skip_short}</div>` : (reason ? `<div style="margin-top:2px;font-size:11px;color:var(--dim)">${reason}</div>` : '')) : ''}
     </div>`;
   } else {
     if (_lastActiveTradeKey !== 'none') {
@@ -8838,8 +8838,8 @@ const mode = t.trade_mode || '';
 
 // Skip reason
 function escHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/'/g,'&#39;'); }
-const skipLine = (o === 'skipped' || o === 'no_fill' || o === 'error') && t.skip_reason ?
-  `<div style="font-size:11px;color:${o === 'error' ? '#d29922' : 'var(--dim)'};margin-top:4px">${escHtml(t.skip_reason)}</div>` : '';
+const skipLine = o === 'error' && t.skip_reason ?
+  `<div style="font-size:11px;color:#d29922;margin-top:4px">${escHtml(t.skip_reason)}</div>` : '';
 
 // Skip outcome — just show market result
 let skipOutcomeLine = '';
@@ -8965,7 +8965,7 @@ async function showTradeDetail(tradeId) {
       }
 
       html += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:3px 12px;font-size:12px;color:var(--dim)">
-        <div style="grid-column:1/-1">Reason: <strong>${_escHtml(t.skip_reason||'—')}</strong></div>
+        ${o === 'error' && t.skip_reason ? '<div style="grid-column:1/-1">Reason: <strong>' + _escHtml(t.skip_reason) + '</strong></div>' : ''}
         <div>Vol Level: <strong>${t.vol_regime ? t.vol_regime + '/5' : '—'}</strong></div>
         <div>Trend: <strong>${t.trend_regime != null ? (t.trend_regime > 0 ? '+' : '') + t.trend_regime : '—'}</strong></div>
         <div>Spread: <strong>${t.spread_at_entry_c != null ? t.spread_at_entry_c + '¢' : '—'}</strong></div>
