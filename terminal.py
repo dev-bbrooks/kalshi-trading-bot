@@ -14,7 +14,7 @@ from flask_socketio import SocketIO, emit, disconnect
 # ── Platform imports ──────────────────────────────────────────
 sys.path.insert(0, "/opt/trading-platform")
 from config import DASHBOARD_USER, DASHBOARD_PASS
-from db import get_config, set_config
+from db import get_config, set_config, get_conn, now_utc
 
 # ── App setup ─────────────────────────────────────────────────
 app = Flask(__name__)
@@ -52,6 +52,60 @@ def _is_authenticated():
         return True
     return False
 
+# ── Terminal session persistence ──────────────────────────────
+
+def _init_terminal_db():
+    with get_conn() as c:
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS terminal_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT,
+                claude_session_id TEXT,
+                created_at TEXT NOT NULL,
+                ended_at TEXT
+            )
+        """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS terminal_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER REFERENCES terminal_sessions(id),
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                activity_log TEXT,
+                created_at TEXT NOT NULL
+            )
+        """)
+
+
+def _save_message(db_session_id, role, content, activity_log=None):
+    if not db_session_id:
+        return
+    with get_conn() as c:
+        c.execute("""
+            INSERT INTO terminal_messages (session_id, role, content, activity_log, created_at)
+            VALUES (?, ?, ?, ?, ?)
+        """, (db_session_id, role, content,
+              json.dumps(activity_log) if activity_log else None,
+              now_utc()))
+
+
+def _get_or_create_db_session(claude_session_id=None):
+    """Get current active session or create one. Returns (db_session_id, claude_session_id)."""
+    with get_conn() as c:
+        row = c.execute("""
+            SELECT id, claude_session_id FROM terminal_sessions
+            WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1
+        """).fetchone()
+        if row:
+            return row["id"], row["claude_session_id"]
+        # Create new session
+        c.execute("""
+            INSERT INTO terminal_sessions (claude_session_id, created_at)
+            VALUES (?, ?)
+        """, (claude_session_id, now_utc()))
+        return c.lastrowid, claude_session_id
+
+
 # ── Active sessions ───────────────────────────────────────────
 _active_session = {"fd": None, "pid": None, "sid": None}
 _claude_session = {"session": None}   # forward declaration for disconnect handler
@@ -88,6 +142,49 @@ def terminal_page():
 @app.route("/terminal/health")
 def health():
     return jsonify({"status": "ok"})
+
+
+@app.route("/terminal/api/session/current")
+def api_session_current():
+    if not _is_authenticated():
+        return jsonify({"error": "unauthorized"}), 401
+    with get_conn() as c:
+        row = c.execute("""
+            SELECT id, claude_session_id, created_at FROM terminal_sessions
+            WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1
+        """).fetchone()
+        if not row:
+            return jsonify({"session": None, "messages": []})
+        session = {
+            "id": row["id"],
+            "claude_session_id": row["claude_session_id"],
+            "created_at": row["created_at"],
+        }
+        msgs = c.execute("""
+            SELECT role, content, activity_log, created_at FROM terminal_messages
+            WHERE session_id = ? ORDER BY id ASC
+        """, (row["id"],)).fetchall()
+        messages = [
+            {"role": m["role"], "content": m["content"],
+             "activity_log": m["activity_log"], "created_at": m["created_at"]}
+            for m in msgs
+        ]
+    return jsonify({"session": session, "messages": messages})
+
+
+@app.route("/terminal/api/session/new", methods=["POST"])
+def api_session_new():
+    if not _is_authenticated():
+        return jsonify({"error": "unauthorized"}), 401
+    with get_conn() as c:
+        # End all active sessions
+        c.execute("UPDATE terminal_sessions SET ended_at = ? WHERE ended_at IS NULL", (now_utc(),))
+        # Create new session
+        c.execute("""
+            INSERT INTO terminal_sessions (created_at) VALUES (?)
+        """, (now_utc(),))
+        new_id = c.lastrowid
+    return jsonify({"session": {"id": new_id, "claude_session_id": None, "created_at": now_utc()}})
 
 
 # ── WebSocket handlers ────────────────────────────────────────
@@ -209,10 +306,11 @@ except KeyError:
 
 
 class ClaudeCodeSession:
-    def __init__(self, sio, sid):
+    def __init__(self, sio, sid, claude_session_id=None, db_session_id=None):
         self.sio = sio
         self.sid = sid
-        self.session_id = None   # Claude's session ID for --resume
+        self.claude_session_id = claude_session_id  # Claude's session ID for --resume
+        self.db_session_id = db_session_id          # terminal_sessions.id
         self.process = None      # subprocess.Popen
         self.alive = True
         self.busy = False
@@ -236,12 +334,21 @@ class ClaudeCodeSession:
         self._emit_state("busy")
         self.prompt_count += 1
 
+        # Ensure we have a db session (create on first prompt)
+        if not self.db_session_id:
+            self.db_session_id, stored_claude_id = _get_or_create_db_session(self.claude_session_id)
+            if not self.claude_session_id and stored_claude_id:
+                self.claude_session_id = stored_claude_id
+
+        # Save user message
+        _save_message(self.db_session_id, "user", text)
+
         cmd = [claude_path, "-p", text,
                "--dangerously-skip-permissions",
                "--output-format", "stream-json", "--verbose"]
 
-        if self.session_id:
-            cmd.extend(["--resume", self.session_id])
+        if self.claude_session_id:
+            cmd.extend(["--resume", self.claude_session_id])
 
         env = os.environ.copy()
         env.pop("ANTHROPIC_API_KEY", None)
@@ -277,6 +384,7 @@ class ClaudeCodeSession:
     def _read_output(self):
         """Read stream-json output line by line."""
         response_parts = []
+        activityLog = []
 
         def _read_lines():
             """Read stdout in a thread-safe way (eventlet + subprocess)."""
@@ -327,6 +435,7 @@ class ClaudeCodeSession:
                                 activity = f"{name}: {inp.get('pattern', '...')}"
                             else:
                                 activity = f"{name}"
+                            activityLog.append(activity)
                             self.sio.emit("claude_status",
                                           {"text": activity, "type": "activity"},
                                           namespace="/terminal/ws", to=self.sid)
@@ -335,7 +444,15 @@ class ClaudeCodeSession:
                 elif msg_type == "result":
                     sid = msg.get("session_id")
                     if sid:
-                        self.session_id = sid
+                        self.claude_session_id = sid
+                        # Persist claude_session_id to database
+                        if self.db_session_id:
+                            try:
+                                with get_conn() as c:
+                                    c.execute("UPDATE terminal_sessions SET claude_session_id = ? WHERE id = ?",
+                                              (sid, self.db_session_id))
+                            except Exception:
+                                pass
                     result_text = msg.get("result", "")
                     if result_text:
                         response_parts = [result_text]
@@ -352,14 +469,18 @@ class ClaudeCodeSession:
 
         if response:
             self.sio.emit("claude_response",
-                          {"text": response, "id": self.session_id or ""},
+                          {"text": response, "id": self.claude_session_id or ""},
                           namespace="/terminal/ws", to=self.sid)
+            # Save assistant message with activity log
+            _save_message(self.db_session_id, "assistant", response, activityLog)
         elif self.process.returncode != 0:
             stderr_out = self.process.stderr.read().decode("utf-8", errors="replace").strip()
+            error_text = "Claude exited with error" + (": " + stderr_out[:500] if stderr_out else "")
             self.sio.emit("claude_error",
                           {"text": "Claude exited with error",
                            "detail": stderr_out[:500]},
                           namespace="/terminal/ws", to=self.sid)
+            _save_message(self.db_session_id, "error", error_text)
 
         # Check response text for restart indicators
         restart_phrases = [
@@ -401,7 +522,7 @@ class ClaudeCodeSession:
 
     def _emit_state(self, state):
         self.sio.emit("claude_state",
-                      {"state": state, "session_id": self.session_id or ""},
+                      {"state": state, "session_id": self.claude_session_id or ""},
                       namespace="/terminal/ws", to=self.sid)
 
 
@@ -414,14 +535,21 @@ def _cleanup_claude():
 # ── Claude Code WebSocket handlers ────────────────────────────
 
 @socketio.on("claude_start", namespace="/terminal/ws")
-def ws_claude_start():
+def ws_claude_start(data=None):
     token = request.cookies.get("platform_auth")
     if not token or not secrets.compare_digest(token, _auth_token()):
         disconnect()
         return
 
     _cleanup_claude()
-    session = ClaudeCodeSession(socketio, request.sid)
+    claude_session_id = None
+    db_session_id = None
+    if isinstance(data, dict):
+        claude_session_id = data.get("claude_session_id")
+        db_session_id = data.get("db_session_id")
+    session = ClaudeCodeSession(socketio, request.sid,
+                                claude_session_id=claude_session_id,
+                                db_session_id=db_session_id)
     _claude_session["session"] = session
     session._emit_state("ready")
 
@@ -849,6 +977,9 @@ TERMINAL_HTML = r"""<!DOCTYPE html>
   var activityCard = null;
   var activityLog = [];
   var autoScroll = true;
+  var currentDbSessionId = null;
+  var currentClaudeSessionId = null;
+  var backendSessionAlive = false;  // true when ws claude_start has been called this connection
 
   function setClaudeState(state) {
     claudeState = state;
@@ -887,7 +1018,7 @@ TERMINAL_HTML = r"""<!DOCTYPE html>
     scrollToBottom();
   }
 
-  function addAssistantMsg(text, rawText) {
+  function addAssistantMsg(text, rawText, restoredActivity) {
     var el = document.createElement('div');
     el.className = 'msg msg-assistant';
     el.innerHTML = renderMd(text);
@@ -904,6 +1035,22 @@ TERMINAL_HTML = r"""<!DOCTYPE html>
     });
     el.appendChild(btn);
     conv.appendChild(el);
+    // Render restored activity log (collapsed) for history messages
+    if (restoredActivity && restoredActivity.length > 0) {
+      var toggle = document.createElement('div');
+      toggle.className = 'activity-collapsed';
+      toggle.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:4px;"><polyline points="9 18 15 12 9 6"/></svg>View activity (' + restoredActivity.length + ' steps)';
+      var logEl = document.createElement('div');
+      logEl.className = 'activity-log';
+      logEl.textContent = restoredActivity.join('\n');
+      toggle.addEventListener('click', function() {
+        var open = logEl.style.display === 'block';
+        logEl.style.display = open ? 'none' : 'block';
+        toggle.innerHTML = (open ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:4px;"><polyline points="9 18 15 12 9 6"/></svg>' : '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:4px;"><polyline points="6 9 12 15 18 9"/></svg>') + 'View activity (' + restoredActivity.length + ' steps)';
+      });
+      conv.appendChild(toggle);
+      conv.appendChild(logEl);
+    }
     scrollToBottom();
   }
 
@@ -973,7 +1120,8 @@ TERMINAL_HTML = r"""<!DOCTYPE html>
   // ── Session management ──
   function startSession(thenSend) {
     claudeSessionStarting = true;
-    socket.emit('claude_start');
+    backendSessionAlive = true;
+    socket.emit('claude_start', {claude_session_id: currentClaudeSessionId, db_session_id: currentDbSessionId});
     // Wait for ready, then optionally send
     if (thenSend) {
       var handler = function(d) {
@@ -1006,7 +1154,7 @@ TERMINAL_HTML = r"""<!DOCTYPE html>
     promptInput.value = '';
     autoResizeInput();
     updateSendBtn();
-    if (claudeState === 'none' || claudeState === 'dead') {
+    if (claudeState === 'none' || claudeState === 'dead' || !backendSessionAlive) {
       startSession(text);
     } else {
       sendPrompt(text);
@@ -1031,9 +1179,17 @@ TERMINAL_HTML = r"""<!DOCTYPE html>
   }
 
   // New session button
-  document.getElementById('new-session-btn').addEventListener('click', function() {
+  document.getElementById('new-session-btn').addEventListener('click', async function() {
     if (claudeState === 'busy' || claudeState === 'ready') {
       socket.emit('claude_stop');
+    }
+    try {
+      var r = await fetch('/terminal/api/session/new', {method: 'POST'});
+      var data = await r.json();
+      currentDbSessionId = data.session.id;
+      currentClaudeSessionId = null;
+    } catch(e) {
+      console.error('Failed to create new session:', e);
     }
     setClaudeState('none');
     addSessionDivider();
@@ -1083,6 +1239,7 @@ TERMINAL_HTML = r"""<!DOCTYPE html>
 
   socket.on('claude_response', function(d) {
     collapseActivityCard();
+    if (d.id) currentClaudeSessionId = d.id;
     addAssistantMsg(d.text, d.text);
   });
 
@@ -1100,14 +1257,18 @@ TERMINAL_HTML = r"""<!DOCTYPE html>
   });
 
   socket.on('disconnect', function() {
+    backendSessionAlive = false;
     if (claudeState !== 'none') setClaudeState('dead');
   });
 
   socket.on('reconnect', function() {
-    // Session is gone after reconnect
+    // WebSocket session is gone, but db session persists
     if (claudeState !== 'none') {
-      setClaudeState('none');
-      addError('Connection lost. Session ended.', true);
+      // Session can be resumed on next prompt via --resume
+      setClaudeState(currentClaudeSessionId ? 'ready' : 'none');
+      if (!currentClaudeSessionId) {
+        addError('Connection lost. Session ended.', true);
+      }
     }
   });
 
@@ -1116,7 +1277,39 @@ TERMINAL_HTML = r"""<!DOCTYPE html>
     logContent.textContent = '';
   });
 
+  // ── Session persistence ──
+  async function loadSession() {
+    try {
+      var r = await fetch('/terminal/api/session/current');
+      var data = await r.json();
+      if (data.session) {
+        currentDbSessionId = data.session.id;
+        currentClaudeSessionId = data.session.claude_session_id;
+        data.messages.forEach(function(msg) {
+          if (msg.role === 'user') {
+            addUserMsg(msg.content);
+          } else if (msg.role === 'assistant') {
+            var activity = [];
+            try { activity = JSON.parse(msg.activity_log || '[]'); } catch(e) {}
+            addAssistantMsg(msg.content, msg.content, activity);
+          } else if (msg.role === 'error') {
+            addError(msg.content, false);
+          }
+        });
+        if (currentClaudeSessionId) {
+          // Show ready state but need startSession on next prompt to create backend session
+          setClaudeState('ready');
+        }
+        // Scroll to bottom after loading history
+        conv.scrollTop = conv.scrollHeight;
+      }
+    } catch(e) {
+      console.error('Failed to load session:', e);
+    }
+  }
+
   // Init
+  loadSession();
   updateSendBtn();
 })();
 </script>
@@ -1126,4 +1319,5 @@ TERMINAL_HTML = r"""<!DOCTYPE html>
 
 # ── Main ──────────────────────────────────────────────────────
 if __name__ == "__main__":
+    _init_terminal_db()
     socketio.run(app, host="0.0.0.0", port=8051, log_output=True)
