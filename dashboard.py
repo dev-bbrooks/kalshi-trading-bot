@@ -4591,7 +4591,7 @@ MAIN_HTML = r"""<!DOCTYPE html>
     margin:12px auto;cursor:grab;flex-shrink:0; }
   #filterSheetScroll { overflow-y:auto;flex:1;padding:0 16px;-webkit-overflow-scrolling:touch;
     overscroll-behavior:contain; }
-  #filterSheetFooter { flex-shrink:0;padding:12px 16px;border-top:1px solid var(--border);
+  #filterSheetFooter { flex-shrink:0;padding:12px 16px max(12px, env(safe-area-inset-bottom)) 16px;border-top:1px solid var(--border);
     background:var(--card);border-radius:0 0 0 0; }
   .fs-below-fold { transition:opacity 200ms; }
   .fs-gradient { position:absolute;bottom:0;left:0;right:0;height:40px;
@@ -8653,6 +8653,7 @@ function _fsComputePositions() {
     half: Math.max(0, panelH - Math.round(vh * 0.5)),
     closed: panelH + 100,
   };
+  if (panel) panel.style.height = panelH + 'px';
 }
 window.addEventListener('resize', function() {
   if (_filterSheet.pos !== 'closed') _fsComputePositions();
