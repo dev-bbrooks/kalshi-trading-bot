@@ -8643,14 +8643,21 @@ function _renderActiveTrade() {
     const _skipObsN = skip.regime_obs_n || _lmNow.regime_obs_n || 0;
     const _skipLabel = _isShadowActive ? '<span class="tc-outcome" style="color:#a371f7">SHADOW TRADE</span>' : '<span class="tc-outcome" style="color:var(--blue)">OBSERVING</span>';
     const _skipCardCls = _isShadowActive ? 'tc-shadow' : 'tc-skip';
-    el.innerHTML = `<div class="trade-card ${_skipCardCls}" style="margin-bottom:10px;border-left-width:3px">
-      <div class="tc-header">
-        <div>${_skipLabel}</div>
-      </div>
-      <div style="margin-top:4px;font-size:12px;color:var(--dim)">${regime}${_skipObsN > 0 ? ` <span style="font-size:10px">n=${_skipObsN}</span>` : ''}</div>
-      ${_drifted ? `<div style="margin-top:2px;font-size:10px;color:#d29922">now ${_nowRegime}</div>` : ''}
-      ${(state.trading_mode || 'observe') !== 'observe' ? (skip.auto_skip_short ? `<div style="margin-top:3px;font-size:10px;color:var(--blue)">Auto: ${skip.auto_skip_short}</div>` : (reason ? `<div style="margin-top:2px;font-size:11px;color:var(--dim)">${reason}</div>` : '')) : ''}
-    </div>`;
+    const _obsNHtml = _skipObsN > 0 ? ' <span style="font-size:10px">n=' + _skipObsN + '</span>' : '';
+    const _driftHtml = _drifted ? '<div style="margin-top:2px;font-size:10px;color:#d29922">now ' + _nowRegime + '</div>' : '';
+    var _reasonHtml = '';
+    if ((state.trading_mode || 'observe') !== 'observe') {
+      if (skip.auto_skip_short) {
+        _reasonHtml = '<div style="margin-top:3px;font-size:10px;color:var(--blue)">Auto: ' + skip.auto_skip_short + '</div>';
+      } else if (reason) {
+        _reasonHtml = '<div style="margin-top:2px;font-size:11px;color:var(--dim)">' + reason + '</div>';
+      }
+    }
+    el.innerHTML = '<div class="trade-card ' + _skipCardCls + '" style="margin-bottom:10px;border-left-width:3px">' +
+      '<div class="tc-header"><div>' + _skipLabel + '</div></div>' +
+      '<div style="margin-top:4px;font-size:12px;color:var(--dim)">' + regime + _obsNHtml + '</div>' +
+      _driftHtml + _reasonHtml +
+    '</div>';
   } else {
     if (_lastActiveTradeKey !== 'none') {
       _lastActiveTradeKey = 'none';
