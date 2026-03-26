@@ -7888,6 +7888,9 @@ function renderUI(s) {
   } catch(e) { console.error('Render error:', e); }
   _adjustContentTop();
 
+  // Render Trades tab active card immediately from state (don't wait for loadTrades)
+  _renderActiveTrade();
+
 }
 
 function _adjustContentTop() {
