@@ -11629,6 +11629,21 @@ function _shadowUpdate(lm, state) {
   var sec = document.getElementById('shadowTradeSection');
   if (!sec) return false;
 
+  // Check for pending_fill from active_shadow (no DB row yet)
+  var aShd = (state || {}).active_shadow;
+  if (aShd && aShd.status === 'pending_fill' && lm && aShd.ticker === lm.ticker) {
+    sec.style.display = '';
+    var pSide = (aShd.side || '').toUpperCase();
+    var pCls = aShd.side === 'yes' ? 'side-yes' : 'side-no';
+    document.getElementById('shadowSide').innerHTML = '<span class="' + pCls + '">' + pSide + '</span>';
+    document.getElementById('shadowFill').innerHTML = aShd.entry_price_c + '¢ <span style="color:var(--yellow);font-size:11px">limit</span>';
+    document.getElementById('shadowSlip').textContent = '—';
+    document.getElementById('shadowPnl').textContent = '—';
+    document.getElementById('shadowPnl').className = 'val';
+    document.getElementById('shadowStatus').innerHTML = '<span style="color:var(--yellow)">Waiting for fill\u2026</span>';
+    return true;
+  }
+
   var shadow = (state || {}).shadow_trade;
   // Use fallback data if primary shadow doesn't match current market
   if ((!shadow || !shadow.ticker || shadow.ticker !== (lm||{}).ticker) && _shadowFallbackData) {

@@ -621,7 +621,7 @@ def _get_shadow_strategy(regime_label: str, hour_et: int = None,
 def _place_shadow_trade(client, ticker, side, price_c,
                         market_id=None, regime_label=None,
                         snapshot_id=None, ctx=None,
-                        strategy_key=None) -> int | None:
+                        strategy_key=None, close_time=None) -> int | None:
     """Place a 1-contract shadow trade for execution data collection."""
     import time as _t
     if not side or side == "n/a" or not price_c or price_c <= 0 or price_c >= 95:
@@ -642,10 +642,20 @@ def _place_shadow_trade(client, ticker, side, price_c,
         if status == "executed":
             fill = client.parse_fill(order)
         elif status == "resting":
+            # Publish pending state so dashboard can show immediately
+            _update_state({"active_shadow": {
+                "ticker": ticker,
+                "side": side,
+                "entry_price_c": price_c,
+                "close_time": close_time.isoformat() if close_time else None,
+                "strategy_key": strategy_key,
+                "status": "pending_fill",
+            }})
             deadline = _t.time() + 60
             fill = client.poll_until_filled(order_id, 1, deadline, interval=3)
         else:
             client.cancel_order(order_id)
+            _update_state({"active_shadow": None})
             return None
 
         fill_count = fill.get("fill_count", 0) if fill else 0
@@ -657,6 +667,7 @@ def _place_shadow_trade(client, ticker, side, price_c,
                 client.cancel_order(order_id)
             except Exception:
                 pass
+            _update_state({"active_shadow": None})
             blog("DEBUG", f"Shadow trade: no fill on {ticker} {side}@{price_c}¢")
             return None
 
@@ -1721,6 +1732,7 @@ def _run_one_market(client: KalshiClient, cfg: dict) -> bool:
                     market_id=market_id, regime_label=regime_label,
                     snapshot_id=snapshot_id, ctx=_sh_ctx,
                     strategy_key=_sh_rec["strategy_key"] if _sh_rec else None,
+                    close_time=close_dt,
                 )
                 if _shadow_id:
                     from plugins.btc_15m.market_db import delete_trades
