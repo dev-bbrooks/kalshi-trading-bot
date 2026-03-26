@@ -4585,7 +4585,7 @@ MAIN_HTML = r"""<!DOCTYPE html>
     opacity:0;transition:opacity 280ms; }
   .fs-panel { position:fixed;left:0;right:0;bottom:0;background:var(--card);
     border-radius:20px 20px 0 0;border:1px solid var(--border);border-bottom:none;
-    max-height:92vh;z-index:151;will-change:transform;transform:translateY(110%);
+    height:85vh;z-index:151;will-change:transform;transform:translateY(110%);
     display:flex;flex-direction:column;max-width:500px;margin:0 auto; }
   .fs-handle-bar { width:36px;height:4px;background:var(--dim);opacity:0.4;border-radius:2px;
     margin:12px auto;cursor:grab;flex-shrink:0; }
@@ -8646,14 +8646,12 @@ var _fsPositions = {};
 
 function _fsComputePositions() {
   var vh = window.innerHeight;
-  var panel = document.getElementById('filterSheetPanel');
-  var panelH = panel ? panel.offsetHeight : Math.round(vh * 0.85);
+  var panelH = Math.round(vh * 0.85);
   _fsPositions = {
     full: 0,
     half: Math.max(0, panelH - Math.round(vh * 0.5)),
     closed: panelH + 100,
   };
-  if (panel) panel.style.height = panelH + 'px';
 }
 window.addEventListener('resize', function() {
   if (_filterSheet.pos !== 'closed') _fsComputePositions();
