@@ -4585,11 +4585,11 @@ MAIN_HTML = r"""<!DOCTYPE html>
     opacity:0;transition:opacity 280ms; }
   .fs-panel { position:fixed;left:0;right:0;bottom:0;background:var(--card);
     border-radius:20px 20px 0 0;border:1px solid var(--border);border-bottom:none;
-    height:85vh;z-index:151;will-change:transform;transform:translateY(110%);
+    height:85vh;z-index:151;will-change:transform;transform:translateY(110%);overflow:hidden;
     display:flex;flex-direction:column;max-width:500px;margin:0 auto; }
   .fs-handle-bar { width:36px;height:4px;background:var(--dim);opacity:0.4;border-radius:2px;
     margin:12px auto;cursor:grab;flex-shrink:0; }
-  #filterSheetScroll { overflow-y:auto;flex:1;padding:0 16px;-webkit-overflow-scrolling:touch;
+  #filterSheetScroll { overflow-y:auto;flex:1;min-height:0;padding:0 16px;-webkit-overflow-scrolling:touch;
     overscroll-behavior:contain; }
   #filterSheetFooter { flex-shrink:0;padding:12px 16px max(12px, env(safe-area-inset-bottom)) 16px;border-top:1px solid var(--border);
     background:var(--card);border-radius:0 0 0 0; }
@@ -13219,7 +13219,7 @@ setTimeout(initPush, 1000);
 <div class="fs-overlay" id="filterSheetOverlay" onclick="if(event.target===this)_fsSnapTo('closed')"></div>
 <div class="fs-panel" id="filterSheetPanel">
   <div class="fs-handle-bar" id="filterSheetHandle"></div>
-  <div id="filterSheetScroll" style="position:relative">
+  <div id="filterSheetScroll">
     <div id="filterSheetContent"></div>
     <div class="fs-gradient" id="fsGradient"></div>
   </div>
