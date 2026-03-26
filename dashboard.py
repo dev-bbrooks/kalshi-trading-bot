@@ -646,10 +646,13 @@ def api_trades_v2():
         "win": "outcome = 'win'",
         "loss": "outcome = 'loss'",
         "skipped": "outcome IN ('skipped', 'no_fill')",
+        "no_fill": "outcome = 'no_fill'",
+        "open": "outcome = 'open'",
         "error": "outcome = 'error'",
         "incomplete": "outcome = 'skipped' AND market_result IS NULL",
         "ignored": "COALESCE(is_ignored, 0) = 1",
         "shadow": "COALESCE(is_shadow, 0) = 1",
+        "real": "COALESCE(is_shadow, 0) = 0 AND outcome IN ('win', 'loss', 'open')",
         "yes": "side = 'yes'",
         "no": "side = 'no'",
         "early": "auto_strategy_key LIKE '%:early:%'",
@@ -659,6 +662,11 @@ def api_trades_v2():
         "model": "auto_strategy_key LIKE 'model:%'",
         "sold": "exit_method = 'sell_fill'",
         "hold": "exit_method = 'market_expiry'",
+        "risk:low": "regime_risk_level = 'low'",
+        "risk:moderate": "regime_risk_level = 'moderate'",
+        "risk:high": "regime_risk_level = 'high'",
+        "risk:terrible": "regime_risk_level = 'terrible'",
+        "risk:unknown": "regime_risk_level IS NULL OR regime_risk_level = 'unknown'",
     }
 
     # Build WHERE clauses — include/exclude system
@@ -682,6 +690,12 @@ def api_trades_v2():
 
     # Includes are OR'd together
     inc_conditions = [_FILTER_SQL[f] for f in include_list if f in _FILTER_SQL]
+    # Handle regime: prefixed includes
+    regime_inc = [f[7:] for f in include_list if f.startswith("regime:")]
+    if regime_inc:
+        placeholders = ",".join(["?"] * len(regime_inc))
+        inc_conditions.append(f"regime_label IN ({placeholders})")
+        params.extend(regime_inc)
     if inc_conditions:
         where_parts.append("(" + " OR ".join(inc_conditions) + ")")
 
@@ -689,13 +703,17 @@ def api_trades_v2():
     for f in exclude_list:
         if f in _FILTER_SQL:
             where_parts.append(f"NOT ({_FILTER_SQL[f]})")
+        elif f.startswith("regime:"):
+            where_parts.append("regime_label != ?")
+            params.append(f[7:])
 
     if regime:
         where_parts.append("regime_label = ?")
         params.append(regime)
 
-    # Exclude open trades — they get their own card
-    where_parts.append("outcome != 'open'")
+    # Exclude open trades unless explicitly filtered for
+    if "open" not in include_list:
+        where_parts.append("outcome != 'open'")
 
     where_sql = " AND ".join(where_parts) if where_parts else "1=1"
 
@@ -8554,10 +8572,8 @@ function _removeFilter(group, key) {
 }
 
 function _setFilterInclude(group, key) {
-  // Clear excludes in this group, set include
-  for (const k of Object.keys(_filterState[group])) {
-    if (_filterState[group][k] === 'exclude') delete _filterState[group][k];
-  }
+  // Set include for this key only, clear its exclude if present
+  if (_filterState[group][key] === 'exclude') delete _filterState[group][key];
   _filterState[group][key] = 'include';
   _updateFilterBadge();
   resetTradeCache();
@@ -8593,10 +8609,12 @@ function _getTradeFilterParams() {
     if (v === 'include') includes.push(k);
     else if (v === 'exclude') excludes.push(k);
   }
-  // Regime — passed as separate param
+  // Regime
   let regime = '';
-  const regInc = Object.entries(fs.regime).filter(([,v]) => v === 'include').map(([k]) => k);
-  if (regInc.length === 1) regime = regInc[0];
+  for (const [k, v] of Object.entries(fs.regime)) {
+    if (v === 'include') includes.push('regime:' + k);
+    else if (v === 'exclude') excludes.push('regime:' + k);
+  }
   // Risk
   for (const [k, v] of Object.entries(fs.risk)) {
     if (v === 'include') includes.push('risk:' + k);
