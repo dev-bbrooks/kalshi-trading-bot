@@ -1440,6 +1440,31 @@ def api_shadow_reconciliation():
         return jsonify({"error": str(e)})
 
 
+@app.route("/api/active_shadow")
+@requires_auth
+def api_active_shadow():
+    """Return the most recent open shadow trade for a given ticker."""
+    try:
+        ticker = request.args.get("ticker", "")
+        if not ticker:
+            return jsonify({"shadow": None})
+        with get_conn() as c:
+            row = c.execute("""
+                SELECT id, ticker, side, avg_fill_price_c, entry_price_c,
+                       actual_cost, outcome, shadow_decision_price_c,
+                       shadow_fill_latency_ms, spread_at_entry_c,
+                       created_at
+                FROM btc15m_trades
+                WHERE COALESCE(is_shadow, 0) = 1
+                  AND ticker = ?
+                  AND outcome = 'open'
+                ORDER BY created_at DESC LIMIT 1
+            """, (ticker,)).fetchone()
+            return jsonify({"shadow": dict(row) if row else None})
+    except Exception as e:
+        return jsonify({"shadow": None, "error": str(e)})
+
+
 @app.route("/api/strategy_persistence")
 @requires_auth
 def api_strategy_persistence():
@@ -7671,7 +7696,8 @@ function renderUI(s) {
       lastStateData._liveMarket = lm;
       if (lm && lm.ticker) {
         mc.style.display = '';
-        mc.style.borderLeftColor = (s.active_shadow && s.active_shadow.trade_id) ? '#a371f7' : 'var(--blue)';
+        var _hasShadowHint = (s.active_shadow && s.active_shadow.trade_id) || (s.shadow_trade && s.shadow_trade.ticker === lm.ticker);
+        mc.style.borderLeftColor = _hasShadowHint ? '#a371f7' : 'var(--blue)';
         lastStateData._nextMarketOpen = lm.close_time;
         $('#monMarket').textContent = marketStartTime(lm.close_time);
         if (lastStateData._monCloseTime !== lm.close_time) {
@@ -7822,6 +7848,12 @@ function renderUI(s) {
         var hasShadow = _shadowUpdate(lm, s);
         if (hasShadow) {
           _simHide();
+          // Fix 1: Override "Observing" header status when shadow trade is visible
+          mc.style.borderLeftColor = '#a371f7';
+          $('#statusDot').className = 'status-dot dot-purple';
+          var _stEl = $('#statusText');
+          _stEl.textContent = 'Shadow Trade';
+          _stEl.style.color = '#a371f7';
         } else {
           _shadowHide();
           _simUpdate(lm);
@@ -11587,6 +11619,10 @@ function _shadowHide() {
   if (sec) sec.style.display = 'none';
 }
 
+var _shadowFallbackPending = false;
+var _shadowFallbackData = null;
+var _shadowFallbackTicker = '';
+
 function _shadowUpdate(lm, state) {
   // Show shadow trade card if there's an active shadow trade for this market.
   // Returns true if shadow trade is displayed (so caller can skip sim card).
@@ -11594,9 +11630,27 @@ function _shadowUpdate(lm, state) {
   if (!sec) return false;
 
   var shadow = (state || {}).shadow_trade;
+  // Use fallback data if primary shadow doesn't match current market
+  if ((!shadow || !shadow.ticker || shadow.ticker !== (lm||{}).ticker) && _shadowFallbackData) {
+    shadow = _shadowFallbackData;
+  }
   if (!shadow || !shadow.ticker || !lm || shadow.ticker !== lm.ticker) {
+    // Trigger async fallback fetch if we have a live market but no shadow match
+    if (lm && lm.ticker && !_shadowFallbackPending && _shadowFallbackTicker !== lm.ticker) {
+      _shadowFallbackPending = true;
+      _shadowFallbackTicker = lm.ticker;
+      api('/api/active_shadow?ticker=' + encodeURIComponent(lm.ticker)).then(function(r) {
+        _shadowFallbackData = r && r.shadow ? r.shadow : null;
+        _shadowFallbackPending = false;
+      }).catch(function() { _shadowFallbackPending = false; });
+    }
     sec.style.display = 'none';
     return false;
+  }
+  // Clear fallback when primary data matches
+  if ((state || {}).shadow_trade && (state || {}).shadow_trade.ticker === lm.ticker) {
+    _shadowFallbackData = null;
+    _shadowFallbackTicker = '';
   }
 
   // We have a shadow trade for this market — show it
