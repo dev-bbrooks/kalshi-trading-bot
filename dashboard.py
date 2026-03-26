@@ -8646,10 +8646,12 @@ var _fsPositions = {};
 
 function _fsComputePositions() {
   var vh = window.innerHeight;
+  var panel = document.getElementById('filterSheetPanel');
+  var panelH = panel ? panel.offsetHeight : Math.round(vh * 0.85);
   _fsPositions = {
-    full: 60,
-    half: Math.round(vh * 0.5),
-    closed: vh + 100,
+    full: 0,
+    half: Math.max(0, panelH - Math.round(vh * 0.5)),
+    closed: panelH + 100,
   };
 }
 window.addEventListener('resize', function() {
