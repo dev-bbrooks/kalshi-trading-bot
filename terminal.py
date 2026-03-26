@@ -243,6 +243,7 @@ class ClaudeCodeSession:
             os.chdir("/opt/trading-platform")
             os.environ["TERM"] = "xterm-256color"
             os.environ["LANG"] = "en_US.UTF-8"
+            os.environ.pop("ANTHROPIC_API_KEY", None)
             os.execvp(claude_path, [claude_path])
         else:
             self.process = pid
