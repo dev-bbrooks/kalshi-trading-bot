@@ -6,8 +6,8 @@ Flask + flask-socketio app serving a browser-based shell via PTY.
 import eventlet
 eventlet.monkey_patch()
 
-import os, sys, pty, re, errno, signal, struct, fcntl, termios, hashlib, secrets, shutil
-from uuid import uuid4
+import os, sys, pty, json, errno, signal, struct, fcntl, termios, hashlib, secrets, shutil, subprocess
+import pwd
 from flask import Flask, request, redirect, jsonify
 from flask_socketio import SocketIO, emit, disconnect
 
@@ -182,27 +182,11 @@ def _read_pty(fd, sid):
     if _active_session["fd"] == fd:
         _cleanup_shell()
 
-# ── Claude Code session ───────────────────────────────────────
-
-# ANSI escape stripper
-_ANSI_RE = re.compile(r'\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07]*\x07|\x1b[()][A-B012]|\x1b\[[\?]?[0-9;]*[hlm]|\x1b\[[0-9]*[ABCDJKHGP]|\x1b=|\x1b>|\r')
-
-def _strip_ansi(text):
-    return _ANSI_RE.sub('', text)
-
-# Activity patterns (⏺ prefix lines from Claude Code)
-_ACTIVITY_RE = re.compile(r'[⏺●]\s+(.+)')
-
-# Claude Code "ready for input" prompt patterns
-# Matches the ">" or "❯" prompt at start of line that signals input ready
-_PROMPT_RE = re.compile(r'(?:^|\n)\s*[>❯]\s*$')
-
-# Also detect the initial welcome/ready state
-_WELCOME_RE = re.compile(r'(?:Type your prompt|How can I help|What would you like)')
+# ── Claude Code session (stream-json mode) ───────────────────
 
 _CLAUDE_SEARCH_PATHS = [
-    "/root/.local/bin/claude",
     "/usr/local/bin/claude",
+    "/root/.local/bin/claude",
     "/root/.npm-global/bin/claude",
     "/usr/bin/claude",
 ]
@@ -216,182 +200,178 @@ def _find_claude():
             return p
     return None
 
+# Pre-resolve claude-worker UID/GID at import time
+try:
+    _CW = pwd.getpwnam("claude-worker")
+except KeyError:
+    _CW = None
+
 
 class ClaudeCodeSession:
     def __init__(self, sio, sid):
         self.sio = sio
         self.sid = sid
-        self.process = None      # child PID
-        self.master_fd = None    # PTY master fd
-        self.alive = False
+        self.session_id = None   # Claude's session ID for --resume
+        self.process = None      # subprocess.Popen
+        self.alive = True
         self.busy = False
-        self.session_id = str(uuid4())[:8]
-        self.raw_buffer = ""
-        self.response_buf = ""   # accumulates response text between prompt sent and ready
+        self.prompt_count = 0
 
-    def start(self):
+    def send_prompt(self, text):
+        if self.busy:
+            self.sio.emit("claude_error", {"text": "Still processing"},
+                          namespace="/terminal/ws", to=self.sid)
+            return
+
         claude_path = _find_claude()
         if not claude_path:
             self.sio.emit("claude_error",
-                          {"text": "Claude Code not found", "detail": "Binary not in PATH or known locations"},
-                          namespace="/terminal/ws", to=self.sid)
-            return False
-
-        pid, fd = pty.fork()
-        if pid == 0:
-            # Child — drop to claude-worker user for --dangerously-skip-permissions
-            import pwd
-            pw = pwd.getpwnam("claude-worker")
-            os.setgid(pw.pw_gid)
-            os.setuid(pw.pw_uid)
-            os.environ["HOME"] = pw.pw_dir
-            os.environ["USER"] = "claude-worker"
-            os.environ["TERM"] = "xterm-256color"
-            os.environ["LANG"] = "en_US.UTF-8"
-            os.environ.pop("ANTHROPIC_API_KEY", None)
-            os.chdir("/opt/trading-platform")
-            os.execvp(claude_path, [claude_path, "--dangerously-skip-permissions"])
-        else:
-            self.process = pid
-            self.master_fd = fd
-            self.alive = True
-
-            # Non-blocking
-            flags = fcntl.fcntl(fd, fcntl.F_GETFL)
-            fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
-
-            self._emit_state("ready")
-            self.sio.start_background_task(self._read_loop)
-            return True
-
-    def send_prompt(self, text):
-        if not self.alive or self.master_fd is None:
-            self.sio.emit("claude_error",
-                          {"text": "No active session"},
-                          namespace="/terminal/ws", to=self.sid)
-            return
-        if self.busy:
-            self.sio.emit("claude_error",
-                          {"text": "Still processing"},
+                          {"text": "Claude Code not found", "detail": "Binary not in PATH"},
                           namespace="/terminal/ws", to=self.sid)
             return
 
         self.busy = True
-        self.response_buf = ""
         self._emit_state("busy")
+        self.prompt_count += 1
 
-        # Write prompt + newline to PTY
-        data = text.strip() + "\n"
+        cmd = [claude_path, "-p", text,
+               "--dangerously-skip-permissions",
+               "--output-format", "stream-json", "--verbose"]
+
+        if self.session_id:
+            cmd.extend(["--resume", "--session-id", self.session_id])
+
+        env = os.environ.copy()
+        env.pop("ANTHROPIC_API_KEY", None)
+        if _CW:
+            env["HOME"] = _CW.pw_dir
+            env["USER"] = "claude-worker"
+
+        def _preexec():
+            if _CW:
+                os.setgid(_CW.pw_gid)
+                os.setuid(_CW.pw_uid)
+
         try:
-            os.write(self.master_fd, data.encode("utf-8"))
-        except OSError as e:
+            self.process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd="/opt/trading-platform",
+                env=env,
+                preexec_fn=_preexec,
+            )
+        except Exception as e:
             self.sio.emit("claude_error",
-                          {"text": "Write failed", "detail": str(e)},
+                          {"text": "Failed to start", "detail": str(e)},
                           namespace="/terminal/ws", to=self.sid)
             self.busy = False
             self._emit_state("ready")
+            return
 
-    def resize(self, rows, cols):
-        if self.master_fd is not None:
-            try:
-                winsize = struct.pack("HHHH", rows, cols, 0, 0)
-                fcntl.ioctl(self.master_fd, termios.TIOCSWINSZ, winsize)
-            except (OSError, ValueError):
-                pass
+        self.sio.start_background_task(self._read_output)
+
+    def _read_output(self):
+        """Read stream-json output line by line."""
+        response_parts = []
+
+        def _read_lines():
+            """Read stdout in a thread-safe way (eventlet + subprocess)."""
+            for raw_line in self.process.stdout:
+                if not self.alive:
+                    break
+                line = raw_line.decode("utf-8", errors="replace").strip()
+                if not line:
+                    continue
+                yield line
+
+        try:
+            for line in _read_lines():
+                # Emit raw for the log tab
+                self.sio.emit("claude_raw", {"data": line + "\n"},
+                              namespace="/terminal/ws", to=self.sid)
+
+                try:
+                    msg = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                msg_type = msg.get("type", "")
+
+                # Assistant message — may contain text or tool_use
+                if msg_type == "assistant":
+                    content = msg.get("message", {}).get("content", [])
+                    for block in content:
+                        if block.get("type") == "text":
+                            response_parts.append(block["text"])
+                        elif block.get("type") == "tool_use":
+                            name = block.get("name", "")
+                            inp = block.get("input", {})
+                            if name == "Read":
+                                activity = f"Reading {inp.get('file_path', '...')}"
+                            elif name == "Write":
+                                activity = f"Writing {inp.get('file_path', '...')}"
+                            elif name == "Bash":
+                                activity = f"Running: {inp.get('command', '...')[:80]}"
+                            elif name == "Edit":
+                                activity = f"Editing {inp.get('file_path', '...')}"
+                            elif name in ("Glob", "Grep"):
+                                activity = f"{name}: {inp.get('pattern', '...')}"
+                            else:
+                                activity = f"{name}"
+                            self.sio.emit("claude_status",
+                                          {"text": activity, "type": "activity"},
+                                          namespace="/terminal/ws", to=self.sid)
+
+                # Final result
+                elif msg_type == "result":
+                    sid = msg.get("session_id")
+                    if sid:
+                        self.session_id = sid
+                    result_text = msg.get("result", "")
+                    if result_text:
+                        response_parts = [result_text]
+
+        except Exception as e:
+            self.sio.emit("claude_error",
+                          {"text": "Read error", "detail": str(e)},
+                          namespace="/terminal/ws", to=self.sid)
+
+        # Process finished
+        self.process.wait()
+
+        response = "\n".join(response_parts).strip() if response_parts else ""
+
+        if response:
+            self.sio.emit("claude_response",
+                          {"text": response, "id": self.session_id or ""},
+                          namespace="/terminal/ws", to=self.sid)
+        elif self.process.returncode != 0:
+            stderr_out = self.process.stderr.read().decode("utf-8", errors="replace").strip()
+            self.sio.emit("claude_error",
+                          {"text": "Claude exited with error",
+                           "detail": stderr_out[:500]},
+                          namespace="/terminal/ws", to=self.sid)
+
+        self.busy = False
+        self.process = None
+        self._emit_state("ready" if self.alive else "dead")
 
     def stop(self):
         self.alive = False
-        fd = self.master_fd
-        pid = self.process
-        self.master_fd = None
-        self.process = None
-        if fd is not None:
+        proc = self.process
+        if proc and proc.poll() is None:
+            proc.terminate()
             try:
-                os.close(fd)
-            except OSError:
-                pass
-        if pid is not None:
-            try:
-                os.kill(pid, signal.SIGTERM)
-            except OSError:
-                pass
-            try:
-                os.waitpid(pid, os.WNOHANG)
-            except (OSError, ChildProcessError):
-                pass
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
         self._emit_state("dead")
 
     def _emit_state(self, state):
         self.sio.emit("claude_state",
-                      {"state": state, "session_id": self.session_id},
+                      {"state": state, "session_id": self.session_id or ""},
                       namespace="/terminal/ws", to=self.sid)
-
-    def _read_loop(self):
-        while self.alive:
-            try:
-                eventlet.sleep(0.01)
-                if not self.alive or self.master_fd is None:
-                    break
-                try:
-                    data = os.read(self.master_fd, 4096)
-                    if not data:
-                        break
-                    text = data.decode("utf-8", errors="replace")
-
-                    # Always emit raw output
-                    self.sio.emit("claude_raw", {"data": text},
-                                  namespace="/terminal/ws", to=self.sid)
-
-                    # Parse clean text
-                    clean = _strip_ansi(text)
-                    self._parse_output(clean)
-
-                except (OSError, IOError) as e:
-                    if getattr(e, 'errno', None) in (errno.EAGAIN, errno.EWOULDBLOCK):
-                        continue
-                    break
-            except Exception:
-                break
-
-        # Session ended
-        if self.alive:
-            self.alive = False
-            self.sio.emit("claude_error",
-                          {"text": "Session ended unexpectedly"},
-                          namespace="/terminal/ws", to=self.sid)
-            self._emit_state("dead")
-
-    def _parse_output(self, clean):
-        self.raw_buffer += clean
-
-        # Check for activity lines
-        for m in _ACTIVITY_RE.finditer(clean):
-            self.sio.emit("claude_status",
-                          {"text": m.group(1).strip(), "type": "activity"},
-                          namespace="/terminal/ws", to=self.sid)
-
-        if self.busy:
-            # Accumulate response text (skip activity lines)
-            for line in clean.splitlines():
-                stripped = line.strip()
-                if stripped and not _ACTIVITY_RE.match(stripped):
-                    self.response_buf += line + "\n"
-
-            # Check if Claude returned to input prompt
-            if _PROMPT_RE.search(self.raw_buffer):
-                response = self.response_buf.strip()
-                if response:
-                    self.sio.emit("claude_response",
-                                  {"text": response, "id": self.session_id},
-                                  namespace="/terminal/ws", to=self.sid)
-                self.busy = False
-                self.response_buf = ""
-                self.raw_buffer = ""
-                self._emit_state("ready")
-        else:
-            # Not busy — check for welcome/ready prompt to clear buffer
-            if _PROMPT_RE.search(self.raw_buffer) or _WELCOME_RE.search(self.raw_buffer):
-                self.raw_buffer = ""
 
 
 def _cleanup_claude():
@@ -411,8 +391,8 @@ def ws_claude_start():
 
     _cleanup_claude()
     session = ClaudeCodeSession(socketio, request.sid)
-    if session.start():
-        _claude_session["session"] = session
+    _claude_session["session"] = session
+    session._emit_state("ready")
 
 @socketio.on("claude_prompt", namespace="/terminal/ws")
 def ws_claude_prompt(data):
@@ -429,15 +409,6 @@ def ws_claude_stop():
     s = _claude_session["session"]
     if s and s.sid == request.sid:
         _cleanup_claude()
-
-@socketio.on("claude_resize", namespace="/terminal/ws")
-def ws_claude_resize(data):
-    s = _claude_session["session"]
-    if s and s.sid == request.sid:
-        try:
-            s.resize(int(data.get("rows", 24)), int(data.get("cols", 80)))
-        except (ValueError, AttributeError):
-            pass
 
 
 # ── HTML template ─────────────────────────────────────────────
