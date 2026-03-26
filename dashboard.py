@@ -4851,13 +4851,13 @@ MAIN_HTML = r"""<!DOCTYPE html>
     <div class="mode-btn" data-mode="observe" onclick="setTradingMode('observe')">
       <span class="mode-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg></span>Observe</div>
     <div class="mode-btn" data-mode="shadow" onclick="setTradingMode('shadow')">
-      <span class="mode-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2C8 2 5 6 5 11c0 3 1 5 2 6.5S9 20 9 22h6c0-2 1-3 2-4.5S19 14 19 11c0-5-3-9-7-9z"/><circle cx="10" cy="11" r="1"/><circle cx="14" cy="11" r="1"/></svg></span>Shadow</div>
+      <span class="mode-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M16 10.5C16 11.3284 15.5523 12 15 12C14.4477 12 14 11.3284 14 10.5C14 9.67157 14.4477 9 15 9C15.5523 9 16 9.67157 16 10.5Z" fill="currentColor"/><ellipse cx="9" cy="10.5" rx="1" ry="1.5" fill="currentColor"/><path d="M22 19.723V12.3006C22 6.61173 17.5228 2 12 2C6.47715 2 2 6.61173 2 12.3006V19.723C2 21.0453 3.35098 21.9054 4.4992 21.314C5.42726 20.836 6.5328 20.9069 7.39614 21.4998C8.36736 22.1667 9.63264 22.1667 10.6039 21.4998L10.9565 21.2576C11.5884 20.8237 12.4116 20.8237 13.0435 21.2576L13.3961 21.4998C14.3674 22.1667 15.6326 22.1667 16.6039 21.4998C17.4672 20.9069 18.5727 20.836 19.5008 21.314C20.649 21.9054 22 21.0453 22 19.723Z"/></svg></span>Shadow</div>
     <div class="mode-btn" data-mode="hybrid" onclick="setTradingMode('hybrid')">
-      <span class="mode-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/></svg></span>Hybrid</div>
+      <span class="mode-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 0 1-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 0 1 4.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0 1 12 15a9.065 9.065 0 0 0-6.23-.693L5 14.5m14.8.8 1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0 1 12 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5"/></svg></span>Hybrid</div>
     <div class="mode-btn" data-mode="auto" onclick="setTradingMode('auto')">
-      <span class="mode-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 12a9 9 0 01-9 9m0 0l3-3m-3 3l-3-3M3 12a9 9 0 019-9m0 0l-3 3m3-3l3 3"/></svg></span>Auto</div>
+      <span class="mode-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"/></svg></span>Auto</div>
     <div class="mode-btn" data-mode="manual" onclick="setTradingMode('manual')">
-      <span class="mode-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l7.07 17 2.51-7.39L21 11.07z"/></svg></span>Manual</div>
+      <span class="mode-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M10.05 4.575a1.575 1.575 0 1 0-3.15 0v3m3.15-3v-1.5a1.575 1.575 0 0 1 3.15 0v1.5m-3.15 0 .075 5.925m3.075.75V4.575m0 0a1.575 1.575 0 0 1 3.15 0V15M6.9 7.575a1.575 1.575 0 1 0-3.15 0v8.175a6.75 6.75 0 0 0 6.75 6.75h2.018a5.25 5.25 0 0 0 3.712-1.538l1.732-1.732a5.25 5.25 0 0 0 1.538-3.712l.003-2.024a.668.668 0 0 1 .198-.471 1.575 1.575 0 1 0-2.228-2.228 3.818 3.818 0 0 0-1.12 2.687M6.9 7.575V12m6.27 4.318A4.49 4.49 0 0 1 16.35 15m.002 0h-.002"/></svg></span>Manual</div>
   </div>
 </div>
 <div class="bot-offline-banner" id="offlineBanner">
@@ -7026,6 +7026,7 @@ function _syncModeStrip(activeMode) {
 
 async function setTradingMode(mode) {
   if (!MODE_META[mode]) return;
+  if (mode === _activeMode) return;
   const meta = MODE_META[mode];
   const midMarket = !!((_uiState.live_market || {}).ticker);
 
@@ -7048,7 +7049,6 @@ async function setTradingMode(mode) {
   } else {
     // Mid-market
     const currentMode = _activeMode || _uiState.trading_mode || 'observe';
-    if (mode === currentMode && !_stagedMode) return;
     if (mode === _stagedMode) {
       // De-stage — revert to current mode
       _stagedMode = null;
@@ -7497,24 +7497,27 @@ function renderUI(s) {
     const _modeDots = {observe:'dot-blue',shadow:'dot-purple',hybrid:'dot-teal',auto:'dot-green',manual:'dot-yellow'};
     const _modeLabels = {observe:'Observing',shadow:'Shadow',hybrid:'Hybrid',auto:'Auto',manual:'Manual'};
 
+    // Use _activeMode for display when staged mid-market, otherwise tradingMode
+    const _displayMode = (_stagedMode && _activeMode) ? _activeMode : tradingMode;
+
     if (_botStale) {
       statusMain = 'Offline';
       statusColor = 'var(--red)';
       dotClass = 'dot-red';
     } else if (!isRunning) {
-      if (tradingMode === 'observe' || tradingMode === 'shadow' || tradingMode === 'hybrid') {
-        statusMain = _modeLabels[tradingMode] || 'Idle';
-        dotClass = _modeDots[tradingMode] || 'dot-blue';
-        statusColor = _modeColors[tradingMode] || 'var(--dim)';
+      if (_displayMode === 'observe' || _displayMode === 'shadow' || _displayMode === 'hybrid') {
+        statusMain = _modeLabels[_displayMode] || 'Idle';
+        dotClass = _modeDots[_displayMode] || 'dot-blue';
+        statusColor = _modeColors[_displayMode] || 'var(--dim)';
       } else {
         statusMain = 'Stopped';
         dotClass = 'dot-red';
         statusColor = 'var(--dim)';
       }
     } else {
-      statusMain = _modeLabels[tradingMode] || 'Running';
-      dotClass = _modeDots[tradingMode] || 'dot-blue';
-      statusColor = _modeColors[tradingMode] || 'var(--blue)';
+      statusMain = _modeLabels[_displayMode] || 'Running';
+      dotClass = _modeDots[_displayMode] || 'dot-blue';
+      statusColor = _modeColors[_displayMode] || 'var(--blue)';
       // Append countdown if a market is active
       var _closeT = (s.active_trade && s.active_trade.close_time) || (s.live_market && s.live_market.close_time);
       if (_closeT) {
