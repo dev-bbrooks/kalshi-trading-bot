@@ -4581,15 +4581,22 @@ MAIN_HTML = r"""<!DOCTYPE html>
   .chip.exclude { border-color: rgba(248,81,73,0.4); color: var(--red); background: rgba(248,81,73,0.08);
                    text-decoration: line-through; text-decoration-thickness: 1.5px; }
   .fs-overlay { position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);
-    backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);z-index:150;display:none; }
+    backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);z-index:150;display:none;
+    opacity:0;transition:opacity 280ms; }
   .fs-panel { position:fixed;left:0;right:0;bottom:0;background:var(--card);
     border-radius:20px 20px 0 0;border:1px solid var(--border);border-bottom:none;
-    max-height:92vh;overflow-y:auto;padding:0 16px 40px;z-index:151;
-    transform:translateY(100%);transition:transform 0.3s cubic-bezier(0.4,0,0.2,1);
-    -webkit-overflow-scrolling:touch;overscroll-behavior:contain; }
-  .fs-panel.open { transform:translateY(0); }
-  .fs-handle { width:36px;height:4px;background:var(--dim);opacity:0.4;border-radius:2px;margin:0 auto;
-    padding:20px 0;background-clip:content-box;cursor:grab;-webkit-tap-highlight-color:transparent; }
+    max-height:92vh;z-index:151;will-change:transform;
+    display:flex;flex-direction:column;max-width:500px;margin:0 auto; }
+  .fs-handle-bar { width:36px;height:4px;background:var(--dim);opacity:0.4;border-radius:2px;
+    margin:12px auto;cursor:grab;flex-shrink:0; }
+  #filterSheetScroll { overflow-y:auto;flex:1;padding:0 16px;-webkit-overflow-scrolling:touch;
+    overscroll-behavior:contain; }
+  #filterSheetFooter { flex-shrink:0;padding:12px 16px;border-top:1px solid var(--border);
+    background:var(--card);border-radius:0 0 0 0; }
+  .fs-below-fold { transition:opacity 200ms; }
+  .fs-gradient { position:absolute;bottom:0;left:0;right:0;height:40px;
+    background:linear-gradient(transparent, var(--card));pointer-events:none;
+    transition:opacity 200ms;z-index:1; }
   .fs-section { margin-bottom:16px; }
   .fs-section-hdr { display:flex;justify-content:space-between;align-items:center;margin-bottom:8px; }
   .fs-section-hdr h4 { font-size:11px;font-weight:700;color:var(--dim);letter-spacing:0.5px;text-transform:uppercase;margin:0; }
@@ -6104,7 +6111,7 @@ function fallbackCopy(text, resolve, reject) {
   document.addEventListener('touchstart', e => {
     const scroller = getScroller();
     const atTop = scroller ? scroller.scrollTop <= 0 : true;
-    if (atTop && e.touches.length === 1 && !isModalOpen() && !_chartTouchActive && _filterSheet.pos !== 'open') {
+    if (atTop && e.touches.length === 1 && !isModalOpen() && !_chartTouchActive && _filterSheet.pos === 'closed') {
       startY = e.touches[0].clientY;
       pulling = true;
       triggered = false;
@@ -6113,7 +6120,7 @@ function fallbackCopy(text, resolve, reject) {
   }, {passive: true});
 
   document.addEventListener('touchmove', e => {
-    if (!pulling || isModalOpen() || _chartTouchActive || _filterSheet.pos === 'open') { pulling = false; return; }
+    if (!pulling || isModalOpen() || _chartTouchActive || _filterSheet.pos !== 'closed') { pulling = false; return; }
     const dy = Math.max(0, e.touches[0].clientY - startY);
     if (dy > showAfter) {
       bar.style.display = '';
@@ -6126,7 +6133,7 @@ function fallbackCopy(text, resolve, reject) {
   }, {passive: true});
 
   document.addEventListener('touchend', e => {
-    if (!pulling || isModalOpen() || _chartTouchActive || _filterSheet.pos === 'open') { pulling = false; return; }
+    if (!pulling || isModalOpen() || _chartTouchActive || _filterSheet.pos !== 'closed') { pulling = false; return; }
     pulling = false;
     const scroller = getScroller();
     const atTop = scroller ? scroller.scrollTop <= 0 : true;
@@ -8625,69 +8632,183 @@ function _getTradeFilterParams() {
 }
 
 // ── Filter Sheet UI ──
-var _filterSheet = { panelH: 0, currentY: 0, pos: 'closed', startY: 0, dragging: false };
+var _filterSheet = {
+  pos: 'closed',
+  currentY: 0,
+  startTouchY: 0,
+  startSheetY: 0,
+  lastTouchY: 0,
+  lastTouchTime: 0,
+  isDragging: false,
+  velocity: 0,
+};
+var _fsPositions = {};
+
+function _fsComputePositions() {
+  var vh = window.innerHeight;
+  _fsPositions = {
+    full: Math.max(20, vh * 0.08),
+    half: Math.max(vh * 0.45, vh - 420),
+    closed: vh + 60,
+  };
+}
+
+function _fsAnimateTo(targetY, duration, callback) {
+  var panel = document.getElementById('filterSheetPanel');
+  _filterSheet.currentY = targetY;
+  panel.style.transition = 'transform ' + (duration||280) + 'ms cubic-bezier(0.32,0.72,0,1)';
+  panel.style.transform = 'translateY(' + targetY + 'px)';
+  setTimeout(function() {
+    panel.style.transition = '';
+    if (callback) callback();
+  }, (duration||280) + 10);
+}
+
+function _fsSnapTo(pos) {
+  var panel = document.getElementById('filterSheetPanel');
+  var overlay = document.getElementById('filterSheetOverlay');
+  var belowFold = document.getElementById('fsBelowFold');
+  var gradient = document.getElementById('fsGradient');
+
+  if (pos === 'full') {
+    _filterSheet.pos = 'full';
+    if (belowFold) belowFold.style.opacity = '1';
+    if (gradient) gradient.style.opacity = '0';
+    _fsAnimateTo(_fsPositions.full);
+    overlay.style.transition = 'opacity 280ms';
+    overlay.style.opacity = '1';
+  } else if (pos === 'half') {
+    _filterSheet.pos = 'half';
+    if (belowFold) { belowFold.style.transition = 'opacity 200ms'; belowFold.style.opacity = '0'; }
+    if (gradient) { gradient.style.transition = 'opacity 200ms'; gradient.style.opacity = '1'; }
+    // Reset scroll position when going to half
+    var scroll = document.getElementById('filterSheetScroll');
+    if (scroll) scroll.scrollTop = 0;
+    _fsAnimateTo(_fsPositions.half);
+    overlay.style.transition = 'opacity 280ms';
+    overlay.style.opacity = '1';
+  } else {
+    _filterSheet.pos = 'closed';
+    var closeDuration = 300;
+    overlay.style.transition = 'opacity ' + closeDuration + 'ms cubic-bezier(0.32,0.72,0,1)';
+    overlay.style.opacity = '0';
+    _fsAnimateTo(_fsPositions.closed, closeDuration, function() {
+      overlay.style.display = 'none';
+      overlay.style.opacity = '';
+      overlay.style.transition = '';
+      panel.style.transform = '';
+    });
+  }
+}
 
 function openFilterSheet() {
-  const overlay = document.getElementById('filterSheetOverlay');
-  const panel = document.getElementById('filterSheetPanel');
+  var overlay = document.getElementById('filterSheetOverlay');
+  var panel = document.getElementById('filterSheetPanel');
   _renderFilterSheetContent();
-  overlay.style.display = 'block';
-  panel.classList.remove('open');
-  requestAnimationFrame(function() {
-    requestAnimationFrame(function() {
-      panel.classList.add('open');
-    });
-  });
-  _filterSheet.pos = 'open';
+  overlay.style.display = 'flex';
+  overlay.style.opacity = '0';
+  panel.style.transition = 'none';
+  panel.style.transform = 'translateY(' + window.innerHeight + 'px)';
+
+  requestAnimationFrame(function() { requestAnimationFrame(function() {
+    _fsComputePositions();
+    overlay.style.transition = 'opacity 280ms';
+    overlay.style.opacity = '1';
+    _fsAnimateTo(_fsPositions.half, 320);
+    _filterSheet.pos = 'half';
+    var belowFold = document.getElementById('fsBelowFold');
+    if (belowFold) belowFold.style.opacity = '0';
+    var gradient = document.getElementById('fsGradient');
+    if (gradient) gradient.style.opacity = '1';
+  }); });
 }
 
 function closeFilterSheet() {
-  const overlay = document.getElementById('filterSheetOverlay');
-  const panel = document.getElementById('filterSheetPanel');
-  panel.classList.remove('open');
-  setTimeout(function() {
-    overlay.style.display = 'none';
-  }, 300);
-  _filterSheet.pos = 'closed';
+  _fsSnapTo('closed');
 }
 
-// Drag handle + sheet touch isolation
+// Drag handler — full panel drag with scroll disambiguation
 (function() {
-  var _dragStartY = 0, _isDragging = false;
-  document.addEventListener('touchstart', function(e) {
-    var handle = document.getElementById('filterSheetHandle');
-    if (!handle || !handle.contains(e.target)) { _isDragging = false; return; }
-    _dragStartY = e.touches[0].clientY;
-    _isDragging = true;
-    var panel = document.getElementById('filterSheetPanel');
-    panel.style.transition = 'none';
-  }, {passive: true});
-  document.addEventListener('touchmove', function(e) {
-    if (!_isDragging) return;
-    var dy = Math.max(0, e.touches[0].clientY - _dragStartY);
-    var panel = document.getElementById('filterSheetPanel');
-    panel.style.transform = 'translateY(' + dy + 'px)';
-  }, {passive: true});
-  document.addEventListener('touchend', function(e) {
-    if (!_isDragging) return;
-    _isDragging = false;
-    var panel = document.getElementById('filterSheetPanel');
-    var dy = (e.changedTouches[0] || {}).clientY - _dragStartY;
-    panel.style.transition = '';
-    if (dy > 200) {
-      closeFilterSheet();
-    } else {
-      panel.style.transform = '';
-      panel.classList.add('open');
-    }
-  });
-  // Block overlay touchmove from propagating to page (Fix 3)
-  // Deferred — overlay element is in HTML below this script
   setTimeout(function() {
-    var ov = document.getElementById('filterSheetOverlay');
-    if (ov) {
-      ov.addEventListener('touchmove', function(e) {
-        if (_filterSheet.pos === 'open' && e.target === ov) {
+    var panel = document.getElementById('filterSheetPanel');
+    var overlay = document.getElementById('filterSheetOverlay');
+    if (!panel) return;
+
+    panel.addEventListener('touchstart', function(e) {
+      _filterSheet.startTouchY = e.touches[0].clientY;
+      _filterSheet.lastTouchY = e.touches[0].clientY;
+      _filterSheet.lastTouchTime = Date.now();
+      _filterSheet.startSheetY = _filterSheet.currentY;
+      _filterSheet.isDragging = false;
+      _filterSheet.velocity = 0;
+      panel.style.transition = 'none';
+    }, {passive: true});
+
+    panel.addEventListener('touchmove', function(e) {
+      var y = e.touches[0].clientY;
+      var dy = y - _filterSheet.startTouchY;
+      var now = Date.now();
+      var dt = now - _filterSheet.lastTouchTime;
+      if (dt > 0) _filterSheet.velocity = (y - _filterSheet.lastTouchY) / dt;
+      _filterSheet.lastTouchY = y;
+      _filterSheet.lastTouchTime = now;
+
+      if (!_filterSheet.isDragging) {
+        if (Math.abs(dy) < 8) return;
+        var scroll = document.getElementById('filterSheetScroll');
+        if (_filterSheet.pos === 'full' && dy > 0 && scroll && scroll.scrollTop > 0) return;
+        _filterSheet.isDragging = true;
+      }
+
+      var newY = Math.max(_fsPositions.full, _filterSheet.startSheetY + dy);
+      _filterSheet.currentY = newY;
+      panel.style.transform = 'translateY(' + newY + 'px)';
+
+      var belowFold = document.getElementById('fsBelowFold');
+      if (belowFold) {
+        var progress = Math.max(0, Math.min(1, (newY - _fsPositions.full) / (_fsPositions.half - _fsPositions.full)));
+        belowFold.style.opacity = 1 - progress;
+        belowFold.style.transition = 'none';
+      }
+
+      if (overlay && newY > _fsPositions.half) {
+        var closeProgress = Math.min(1, (newY - _fsPositions.half) / 200);
+        overlay.style.opacity = 1 - (closeProgress * 0.85);
+        overlay.style.transition = 'none';
+      } else if (overlay) {
+        overlay.style.opacity = '1';
+      }
+    }, {passive: true});
+
+    panel.addEventListener('touchend', function() {
+      if (!_filterSheet.isDragging) { panel.style.transition = ''; return; }
+      _filterSheet.isDragging = false;
+
+      var y = _filterSheet.currentY;
+      var vel = _filterSheet.velocity;
+
+      if (vel < -0.5) { _fsSnapTo('full'); return; }
+      if (vel > 0.5) {
+        _fsSnapTo(_filterSheet.pos === 'full' ? 'half' : 'closed');
+        return;
+      }
+
+      var midFullHalf = (_fsPositions.full + _fsPositions.half) / 2;
+      var closeThreshold = _fsPositions.half + 120;
+
+      if (y < midFullHalf) {
+        _fsSnapTo('full');
+      } else if (y > closeThreshold) {
+        _fsSnapTo('closed');
+      } else {
+        _fsSnapTo('half');
+      }
+    }, {passive: true});
+
+    // Block overlay touchmove from propagating to page
+    if (overlay) {
+      overlay.addEventListener('touchmove', function(e) {
+        if (_filterSheet.pos !== 'closed' && e.target === overlay) {
           e.preventDefault();
         }
       }, {passive: false});
@@ -8750,6 +8871,7 @@ function _renderFilterSheetContent() {
     {key:'sold',label:'SOLD'},{key:'hold',label:'HOLD'}
   ]);
 
+  html += '<div id="fsBelowFold" class="fs-below-fold">';
   // Regime section — use _filterRegimes populated from API
   if (_filterRegimes.length > 0) {
     var regItems = _filterRegimes.map(function(r) { return {key: r, label: r.replace(/_/g, ' ')}; });
@@ -8759,8 +8881,7 @@ function _renderFilterSheetContent() {
   html += section('Risk Level', 'risk', [
     {key:'low',label:'LOW'},{key:'moderate',label:'MODERATE'},{key:'high',label:'HIGH'},{key:'unknown',label:'UNKNOWN'}
   ]);
-
-  html += '<div style="margin-top:12px;text-align:center"><button onclick="_clearAllFilters()" class="btn btn-dim" style="font-size:11px;padding:6px 16px">Clear All Filters</button></div>';
+  html += '</div>';
 
   el.innerHTML = html;
 }
@@ -13090,10 +13211,16 @@ setTimeout(initPush, 1000);
 
 </script>
 <!-- Filter Sheet -->
-<div class="fs-overlay" id="filterSheetOverlay" onclick="if(event.target===this)closeFilterSheet()"></div>
+<div class="fs-overlay" id="filterSheetOverlay" onclick="if(event.target===this)_fsSnapTo('closed')"></div>
 <div class="fs-panel" id="filterSheetPanel">
-  <div class="fs-handle" id="filterSheetHandle"></div>
-  <div id="filterSheetContent"></div>
+  <div class="fs-handle-bar" id="filterSheetHandle"></div>
+  <div id="filterSheetScroll" style="position:relative">
+    <div id="filterSheetContent"></div>
+    <div class="fs-gradient" id="fsGradient"></div>
+  </div>
+  <div id="filterSheetFooter">
+    <button onclick="_clearAllFilters()" class="btn btn-dim" style="font-size:11px;padding:6px 16px;width:100%">Clear All Filters</button>
+  </div>
 </div>
 </body>
 </html>"""
