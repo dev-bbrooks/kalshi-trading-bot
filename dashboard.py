@@ -4562,6 +4562,30 @@ MAIN_HTML = r"""<!DOCTYPE html>
   .chip.active-purple { border-color: #a371f7; color: #a371f7; background: rgba(163,113,247,0.1); }
   .chip.exclude { border-color: rgba(248,81,73,0.4); color: var(--red); background: rgba(248,81,73,0.08);
                    text-decoration: line-through; text-decoration-thickness: 1.5px; }
+  .fs-overlay { position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);
+    backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);z-index:150;display:none; }
+  .fs-panel { position:fixed;left:0;right:0;bottom:0;background:var(--card);
+    border-radius:20px 20px 0 0;border:1px solid var(--border);border-bottom:none;
+    max-height:92vh;overflow-y:auto;padding:0 16px 40px;z-index:151;
+    transform:translateY(100%);transition:transform 0.3s cubic-bezier(0.4,0,0.2,1);
+    -webkit-overflow-scrolling:touch;overscroll-behavior:contain; }
+  .fs-panel.open { transform:translateY(0); }
+  .fs-handle { width:36px;height:4px;background:var(--dim);opacity:0.4;border-radius:2px;margin:12px auto 16px; }
+  .fs-section { margin-bottom:16px; }
+  .fs-section-hdr { display:flex;justify-content:space-between;align-items:center;margin-bottom:8px; }
+  .fs-section-hdr h4 { font-size:11px;font-weight:700;color:var(--dim);letter-spacing:0.5px;text-transform:uppercase;margin:0; }
+  .fs-section-hdr button { font-size:10px;color:var(--dim);background:none;border:none;cursor:pointer;padding:2px 6px; }
+  .fs-pills { display:flex;flex-wrap:wrap;gap:6px; }
+  .fs-pill { font-size:11px;padding:5px 10px;border-radius:14px;cursor:pointer;border:1px solid var(--border);
+    background:var(--bg);color:var(--dim);font-weight:600;-webkit-tap-highlight-color:transparent;transition:all 0.15s; }
+  .fs-pill.inc { border-color:var(--green);color:var(--green);background:rgba(63,185,80,0.1); }
+  .fs-pill.exc { border-color:var(--red);color:var(--red);background:rgba(248,81,73,0.08); }
+  .fs-active-row { display:flex;flex-wrap:wrap;gap:4px;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border); }
+  .fs-active-chip { font-size:10px;padding:3px 8px;border-radius:10px;cursor:pointer;font-weight:600; }
+  .fs-active-chip.inc { background:rgba(63,185,80,0.12);color:var(--green);border:1px solid rgba(63,185,80,0.3); }
+  .fs-active-chip.exc { background:rgba(248,81,73,0.08);color:var(--red);border:1px solid rgba(248,81,73,0.3); }
+  .fs-scroll { display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:4px; }
+  .fs-scroll .fs-pill { flex-shrink:0; }
   .collapsible > h3 { cursor: pointer; display: flex; justify-content: space-between;
                        align-items: center; -webkit-tap-highlight-color: transparent;
                        user-select: none; }
@@ -5715,9 +5739,15 @@ MAIN_HTML = r"""<!DOCTYPE html>
 <div id="pageTrades" class="page" style="padding:0 16px">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
       <div class="dim" style="font-size:10px;font-weight:600;letter-spacing:0.5px">TRADES</div>
-      <button onclick="exportCSV()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:10px;color:var(--dim);cursor:pointer;-webkit-tap-highlight-color:transparent">
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px;margin-right:2px"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>CSV
-      </button>
+      <div style="display:flex;gap:6px;align-items:center">
+        <button id="filterSheetBtn" onclick="openFilterSheet()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:10px;color:var(--dim);cursor:pointer;-webkit-tap-highlight-color:transparent;position:relative">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px;margin-right:2px"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>Filter
+          <span id="filterSheetCount" style="display:none;position:absolute;top:-5px;right:-5px;background:var(--blue);color:#fff;font-size:8px;font-weight:700;min-width:14px;height:14px;line-height:14px;text-align:center;border-radius:7px;padding:0 3px"></span>
+        </button>
+        <button onclick="exportCSV()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:10px;color:var(--dim);cursor:pointer;-webkit-tap-highlight-color:transparent">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px;margin-right:2px"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>CSV
+        </button>
+      </div>
     </div>
 
     <!-- Active trade card -->
@@ -5727,46 +5757,12 @@ MAIN_HTML = r"""<!DOCTYPE html>
     <div id="tradeFilterStats" style="display:none;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:10px">
     </div>
 
-    <!-- Outcome filters -->
-    <div class="filter-chips" id="tradeFilters">
-      <button class="chip active" data-filter="all" onclick="setTradeFilter('all')">All</button>
-      <div class="filter-sep"></div>
-      <button class="chip" data-filter="win" onclick="setTradeFilter('win')">Wins</button>
-      <button class="chip" data-filter="loss" onclick="setTradeFilter('loss')">Losses</button>
-      <button class="chip" data-filter="skipped" onclick="setTradeFilter('skipped')">Observed</button>
-      <button class="chip" data-filter="error" onclick="setTradeFilter('error')">Errors</button>
-      <div class="filter-sep"></div>
-      <button class="chip" data-filter="yes" onclick="setTradeFilter('yes')">YES</button>
-      <button class="chip" data-filter="no" onclick="setTradeFilter('no')">NO</button>
-      <div class="filter-sep"></div>
-      <button class="chip" data-filter="early" onclick="setTradeFilter('early')">Early</button>
-      <button class="chip" data-filter="mid" onclick="setTradeFilter('mid')">Mid</button>
-      <button class="chip" data-filter="late" onclick="setTradeFilter('late')">Late</button>
-      <div class="filter-sep"></div>
-      <button class="chip" data-filter="cheaper" onclick="setTradeFilter('cheaper')">Cheaper</button>
-      <button class="chip" data-filter="model" onclick="setTradeFilter('model')">Model</button>
-      <div class="filter-sep"></div>
-      <button class="chip" data-filter="sold" onclick="setTradeFilter('sold')">Sold</button>
-      <button class="chip" data-filter="hold" onclick="setTradeFilter('hold')">Hold</button>
-      <div class="filter-sep"></div>
-      <button class="chip" data-filter="shadow" onclick="setTradeFilter('shadow')">Shadow</button>
-      <button class="chip" data-filter="ignored" onclick="setTradeFilter('ignored')">Ignored</button>
-      <button class="chip" data-filter="incomplete" onclick="setTradeFilter('incomplete')">Incomplete</button>
-    </div>
-
     <!-- Delete incomplete button (shown when incomplete filter active) -->
     <div id="deleteIncompleteBar" style="display:none;margin-bottom:8px">
       <button class="btn btn-dim" style="font-size:11px;padding:4px 10px;border-color:rgba(248,81,73,0.3);color:var(--red)" onclick="deleteAllIncomplete()">
         Delete all incomplete
       </button>
       <span class="dim" style="font-size:10px;margin-left:6px">Observatory data preserved</span>
-    </div>
-
-    <!-- Regime filter -->
-    <div style="margin-bottom:10px">
-      <select id="tradeRegimeFilter" onchange="resetTradeCache();loadTrades()" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px;padding:6px 10px;width:100%;-webkit-appearance:none">
-        <option value="">All regimes</option>
-      </select>
     </div>
 
     <div id="skelTrades" class="skel-wrap">
@@ -8454,16 +8450,17 @@ async function loadConfig() {
 }
 
 // ── Trades + Regimes ────────────────────────────────────
-// Filter state: Map of filter → 'include' | 'exclude'. Absent = default (no filter)
-let _tradeFilterState = new Map();
-const _tradeFilterIncColors = {
-  win:'active-green', loss:'active-red',
-  skipped:'active', error:'active-yellow', incomplete:'active-red', ignored:'active-yellow', shadow:'active-purple',
-  yes:'active-green', no:'active-red',
-  early:'active', mid:'active', late:'active',
-  cheaper:'active-yellow', model:'active',
-  sold:'active-green', hold:'active',
+var _filterState = {
+  outcome: {},
+  tradeType: {},
+  strategy: {},
+  timing: {},
+  exit: {},
+  regime: {},
+  risk: {},
 };
+var _filterRegimes = []; // populated from API
+
 let _tradeOffset = 0;
 let _tradeHasMore = false;
 let _tradeLoading = false;
@@ -8490,17 +8487,6 @@ async function exportCSV() {
   }
 }
 
-function _getTradeFilterParams() {
-  const includes = [];
-  const excludes = [];
-  for (const [f, state] of _tradeFilterState) {
-    if (state === 'include') includes.push(f);
-    else if (state === 'exclude') excludes.push(f);
-  }
-  const regime = ($('#tradeRegimeFilter') || {}).value || '';
-  return { include: includes.join(','), exclude: excludes.join(','), regime };
-}
-
 function resetTradeCache() {
   _lastFilterStatsKey = '';
   _lastActiveTradeKey = '';
@@ -8508,43 +8494,244 @@ function resetTradeCache() {
   if (el) el.dataset.key = '';
 }
 
-function setTradeFilter(filter) {
-  if (filter === 'all') {
-    _tradeFilterState.clear();
-  } else {
-    const cur = _tradeFilterState.get(filter);
-    if (!cur) {
-      _tradeFilterState.set(filter, 'include');
-    } else if (cur === 'include') {
-      _tradeFilterState.set(filter, 'exclude');
-    } else {
-      _tradeFilterState.delete(filter);
-    }
+function _countActiveFilters() {
+  let n = 0;
+  for (const group of Object.values(_filterState)) {
+    for (const v of Object.values(group)) { if (v) n++; }
   }
-  // Update chip visuals
-  const hasAny = _tradeFilterState.size > 0;
-  document.querySelectorAll('#tradeFilters .chip').forEach(c => {
-    const f = c.dataset.filter;
-    if (!f) return;
-    if (f === 'all') {
-      c.className = hasAny ? 'chip' : 'chip active';
-      return;
-    }
-    const state = _tradeFilterState.get(f);
-    if (state === 'include') {
-      c.className = 'chip ' + (_tradeFilterIncColors[f] || 'active');
-    } else if (state === 'exclude') {
-      c.className = 'chip exclude';
-    } else {
-      c.className = 'chip';
-    }
-  });
-  resetTradeCache();
-  loadTrades();
+  return n;
+}
 
+function _updateFilterBadge() {
+  const n = _countActiveFilters();
+  const badge = document.getElementById('filterSheetCount');
+  if (badge) {
+    badge.textContent = n;
+    badge.style.display = n > 0 ? '' : 'none';
+  }
   // Show/hide delete incomplete bar
   const delBar = document.getElementById('deleteIncompleteBar');
-  if (delBar) delBar.style.display = _tradeFilterState.get('incomplete') === 'include' ? '' : 'none';
+  if (delBar) delBar.style.display = _filterState.outcome.no_fill === 'include' || _filterState.tradeType.incomplete === 'include' ? '' : 'none';
+}
+
+function _toggleFilter(group, key) {
+  const cur = _filterState[group][key];
+  if (!cur) {
+    _filterState[group][key] = 'include';
+  } else if (cur === 'include') {
+    _filterState[group][key] = 'exclude';
+  } else {
+    delete _filterState[group][key];
+  }
+  _updateFilterBadge();
+  _renderFilterSheetContent();
+  resetTradeCache();
+  loadTrades();
+}
+
+function _clearFilterGroup(group) {
+  _filterState[group] = {};
+  _updateFilterBadge();
+  _renderFilterSheetContent();
+  resetTradeCache();
+  loadTrades();
+}
+
+function _clearAllFilters() {
+  for (const g of Object.keys(_filterState)) _filterState[g] = {};
+  _updateFilterBadge();
+  _renderFilterSheetContent();
+  resetTradeCache();
+  loadTrades();
+}
+
+function _removeFilter(group, key) {
+  delete _filterState[group][key];
+  _updateFilterBadge();
+  _renderFilterSheetContent();
+  resetTradeCache();
+  loadTrades();
+}
+
+function _setFilterInclude(group, key) {
+  // Clear excludes in this group, set include
+  for (const k of Object.keys(_filterState[group])) {
+    if (_filterState[group][k] === 'exclude') delete _filterState[group][k];
+  }
+  _filterState[group][key] = 'include';
+  _updateFilterBadge();
+  resetTradeCache();
+  loadTrades();
+}
+
+function _getTradeFilterParams() {
+  const includes = [];
+  const excludes = [];
+  const fs = _filterState;
+  // Outcome
+  for (const [k, v] of Object.entries(fs.outcome)) {
+    if (v === 'include') includes.push(k);
+    else if (v === 'exclude') excludes.push(k);
+  }
+  // Trade type
+  for (const [k, v] of Object.entries(fs.tradeType)) {
+    if (v === 'include') includes.push(k);
+    else if (v === 'exclude') excludes.push(k);
+  }
+  // Strategy
+  for (const [k, v] of Object.entries(fs.strategy)) {
+    if (v === 'include') includes.push(k);
+    else if (v === 'exclude') excludes.push(k);
+  }
+  // Timing
+  for (const [k, v] of Object.entries(fs.timing)) {
+    if (v === 'include') includes.push(k);
+    else if (v === 'exclude') excludes.push(k);
+  }
+  // Exit
+  for (const [k, v] of Object.entries(fs.exit)) {
+    if (v === 'include') includes.push(k);
+    else if (v === 'exclude') excludes.push(k);
+  }
+  // Regime — passed as separate param
+  let regime = '';
+  const regInc = Object.entries(fs.regime).filter(([,v]) => v === 'include').map(([k]) => k);
+  if (regInc.length === 1) regime = regInc[0];
+  // Risk
+  for (const [k, v] of Object.entries(fs.risk)) {
+    if (v === 'include') includes.push('risk:' + k);
+    else if (v === 'exclude') excludes.push('risk:' + k);
+  }
+  return { include: includes.join(','), exclude: excludes.join(','), regime };
+}
+
+// ── Filter Sheet UI ──
+var _filterSheet = { panelH: 0, currentY: 0, pos: 'closed', startY: 0, dragging: false };
+
+function openFilterSheet() {
+  const overlay = document.getElementById('filterSheetOverlay');
+  const panel = document.getElementById('filterSheetPanel');
+  _renderFilterSheetContent();
+  overlay.style.display = 'block';
+  panel.classList.remove('open');
+  requestAnimationFrame(function() {
+    requestAnimationFrame(function() {
+      panel.classList.add('open');
+    });
+  });
+  _filterSheet.pos = 'open';
+}
+
+function closeFilterSheet() {
+  const overlay = document.getElementById('filterSheetOverlay');
+  const panel = document.getElementById('filterSheetPanel');
+  panel.classList.remove('open');
+  setTimeout(function() {
+    overlay.style.display = 'none';
+  }, 300);
+  _filterSheet.pos = 'closed';
+}
+
+// Drag handle
+(function() {
+  var startY = 0, dragging = false;
+  var handle = null;
+  document.addEventListener('touchstart', function(e) {
+    handle = document.getElementById('filterSheetHandle');
+    if (!handle || !handle.contains(e.target)) { dragging = false; return; }
+    startY = e.touches[0].clientY;
+    dragging = true;
+  }, {passive: true});
+  document.addEventListener('touchmove', function(e) {
+    if (!dragging) return;
+    var panel = document.getElementById('filterSheetPanel');
+    var dy = Math.max(0, e.touches[0].clientY - startY);
+    panel.style.transition = 'none';
+    panel.style.transform = 'translateY(' + dy + 'px)';
+  }, {passive: true});
+  document.addEventListener('touchend', function(e) {
+    if (!dragging) return;
+    dragging = false;
+    var panel = document.getElementById('filterSheetPanel');
+    var dy = (e.changedTouches[0] || {}).clientY - startY;
+    panel.style.transition = '';
+    if (dy > 200) {
+      closeFilterSheet();
+    } else {
+      panel.style.transform = '';
+      panel.classList.add('open');
+    }
+  });
+})();
+
+function _renderFilterSheetContent() {
+  var el = document.getElementById('filterSheetContent');
+  if (!el) return;
+  var html = '';
+  var fs = _filterState;
+
+  // Active filters row
+  var activeChips = [];
+  for (var g of Object.keys(fs)) {
+    for (var k of Object.keys(fs[g])) {
+      var v = fs[g][k];
+      if (v) {
+        var cls = v === 'include' ? 'inc' : 'exc';
+        var icon = v === 'include' ? '✓ ' : '✕ ';
+        activeChips.push('<span class="fs-active-chip ' + cls + '" onclick="_removeFilter(\'' + g + '\',\'' + k + '\')">' + icon + k.replace(/_/g, ' ') + '</span>');
+      }
+    }
+  }
+  if (activeChips.length > 0) {
+    html += '<div class="fs-active-row">' + activeChips.join('') + '</div>';
+  }
+
+  function section(title, group, items) {
+    var h = '<div class="fs-section"><div class="fs-section-hdr"><h4>' + title + '</h4>';
+    h += '<button onclick="_clearFilterGroup(\'' + group + '\')">All</button></div>';
+    var isScroll = group === 'regime';
+    h += '<div class="' + (isScroll ? 'fs-scroll' : 'fs-pills') + '">';
+    for (var i = 0; i < items.length; i++) {
+      var item = items[i];
+      var state = (fs[group] || {})[item.key] || '';
+      var cls = state === 'include' ? ' inc' : state === 'exclude' ? ' exc' : '';
+      var prefix = state === 'include' ? '✓ ' : state === 'exclude' ? '✕ ' : '';
+      h += '<div class="fs-pill' + cls + '" onclick="_toggleFilter(\'' + group + '\',\'' + item.key + '\')">' + prefix + item.label + '</div>';
+    }
+    h += '</div></div>';
+    return h;
+  }
+
+  html += section('Outcome', 'outcome', [
+    {key:'win',label:'WIN'},{key:'loss',label:'LOSS'},{key:'skipped',label:'OBSERVED'},
+    {key:'error',label:'ERROR'},{key:'no_fill',label:'NO FILL'},{key:'open',label:'OPEN'}
+  ]);
+  html += section('Trade Type', 'tradeType', [
+    {key:'shadow',label:'SHADOW'},{key:'real',label:'REAL'},{key:'ignored',label:'IGNORED'},{key:'incomplete',label:'INCOMPLETE'}
+  ]);
+  html += section('Strategy', 'strategy', [
+    {key:'cheaper',label:'CHEAPER'},{key:'model',label:'MODEL'}
+  ]);
+  html += section('Timing', 'timing', [
+    {key:'early',label:'EARLY'},{key:'mid',label:'MID'},{key:'late',label:'LATE'}
+  ]);
+  html += section('Exit', 'exit', [
+    {key:'sold',label:'SOLD'},{key:'hold',label:'HOLD'}
+  ]);
+
+  // Regime section — use _filterRegimes populated from API
+  if (_filterRegimes.length > 0) {
+    var regItems = _filterRegimes.map(function(r) { return {key: r, label: r.replace(/_/g, ' ')}; });
+    html += section('Regime', 'regime', regItems);
+  }
+
+  html += section('Risk Level', 'risk', [
+    {key:'low',label:'LOW'},{key:'moderate',label:'MODERATE'},{key:'high',label:'HIGH'},{key:'unknown',label:'UNKNOWN'}
+  ]);
+
+  html += '<div style="margin-top:12px;text-align:center"><button onclick="_clearAllFilters()" class="btn btn-dim" style="font-size:11px;padding:6px 16px">Clear All Filters</button></div>';
+
+  el.innerHTML = html;
 }
 
 async function deleteAllIncomplete() {
@@ -8676,21 +8863,10 @@ async function loadTrades() {
     const d = await api(`/api/trades_v2?include=${encodeURIComponent(include)}&exclude=${encodeURIComponent(exclude)}&regime=${encodeURIComponent(regime)}&offset=0&limit=${_TRADE_PAGE_SIZE}`);
     hideSkel('skelTrades');
 
-    // Populate regime dropdown (preserve current selection)
-    const sel = $('#tradeRegimeFilter');
-    const curVal = sel.value;
+    // Populate regime list for filter sheet
     if (d.regimes) {
-      const existing = new Set([...sel.options].map(o => o.value));
-      for (const r of d.regimes) {
-        if (!existing.has(r)) {
-          const opt = document.createElement('option');
-          opt.value = r;
-          opt.textContent = r.replace(/_/g, ' ');
-          sel.appendChild(opt);
-        }
-      }
+      _filterRegimes = d.regimes;
     }
-    sel.value = curVal || regime;
 
     _renderFilterStats(d.stats);
     _renderActiveTrade();
@@ -8796,47 +8972,47 @@ const regLabel = (t.regime_label || 'unknown').replace(/_/g, ' ');
 
 // Tags — every filter corresponds to a tag, every tag is clickable
 let tags = '';
-function tag(label, cls, filter) {
-  return `<span class="tc-tag ${cls}" onclick="event.stopPropagation();setTradeFilter('${filter}',null)">${label}</span>`;
+function tag(label, cls, filter, group) {
+  return '<span class="tc-tag ' + cls + '" onclick="event.stopPropagation();_setFilterInclude(\'' + (group||'outcome') + '\',\'' + filter + '\')">' + label + '</span>';
 }
 
 // Outcome tag
-if (o === 'win') tags += tag('WIN', 'tag-win', 'win');
-else if (o === 'loss') tags += tag('LOSS', 'tag-loss', 'loss');
-else if (o === 'skipped' || o === 'no_fill') tags += tag(o === 'no_fill' ? 'NO FILL' : 'OBSERVED', 'tag-skip', 'skipped');
-else if (o === 'error') tags += tag('ERROR', 'tag-error', 'error');
-else if (o === 'open') tags += tag('OPEN', 'tag-open', 'open');
+if (o === 'win') tags += tag('WIN', 'tag-win', 'win', 'outcome');
+else if (o === 'loss') tags += tag('LOSS', 'tag-loss', 'loss', 'outcome');
+else if (o === 'skipped' || o === 'no_fill') tags += tag(o === 'no_fill' ? 'NO FILL' : 'OBSERVED', 'tag-skip', 'skipped', 'outcome');
+else if (o === 'error') tags += tag('ERROR', 'tag-error', 'error', 'outcome');
+else if (o === 'open') tags += tag('OPEN', 'tag-open', 'open', 'outcome');
 
 // Side tag (real trades and shadow trades — observed trades don't have a meaningful side)
 if (['win', 'loss', 'open'].includes(o) || isShadow) {
-  if (t.side === 'yes') tags += tag('YES', 'tag-yes', 'yes');
-  else if (t.side === 'no') tags += tag('NO', 'tag-no', 'no');
+  if (t.side === 'yes') tags += tag('YES', 'tag-yes', 'yes', 'outcome');
+  else if (t.side === 'no') tags += tag('NO', 'tag-no', 'no', 'outcome');
 }
 
 // Special tags
-if (isShadow) tags += tag('SHADOW', 'tag-shadow', 'shadow');
-else if (t.is_ignored) tags += tag('IGNORED', 'ignored', 'ignored');
+if (isShadow) tags += tag('SHADOW', 'tag-shadow', 'shadow', 'tradeType');
+else if (t.is_ignored) tags += tag('IGNORED', 'ignored', 'ignored', 'tradeType');
 
 // Incomplete: observed but no market result resolved yet
-if (o === 'skipped' && !t.market_result) tags += tag('INCOMPLETE', 'tag-incomplete', 'incomplete');
+if (o === 'skipped' && !t.market_result) tags += tag('INCOMPLETE', 'tag-incomplete', 'incomplete', 'tradeType');
 
 // Strategy key tags — parse side:timing:entry_max:sell_target
 const _sk = t.auto_strategy_key || '';
 if (_sk) {
   const _skParts = _sk.split(':');
   // Strategy side rule
-  if (_skParts[0] === 'cheaper') tags += tag('CHEAPER', 'tag-cheaper', 'cheaper');
-  else if (_skParts[0] === 'model') tags += tag('MODEL', 'tag-model', 'model');
+  if (_skParts[0] === 'cheaper') tags += tag('CHEAPER', 'tag-cheaper', 'cheaper', 'strategy');
+  else if (_skParts[0] === 'model') tags += tag('MODEL', 'tag-model', 'model', 'strategy');
   // Entry timing
-  if (_skParts[1] === 'early') tags += tag('EARLY', 'tag-early', 'early');
-  else if (_skParts[1] === 'mid') tags += tag('MID', 'tag-mid', 'mid');
-  else if (_skParts[1] === 'late') tags += tag('LATE', 'tag-late', 'late');
+  if (_skParts[1] === 'early') tags += tag('EARLY', 'tag-early', 'early', 'timing');
+  else if (_skParts[1] === 'mid') tags += tag('MID', 'tag-mid', 'mid', 'timing');
+  else if (_skParts[1] === 'late') tags += tag('LATE', 'tag-late', 'late', 'timing');
 }
 
 // Exit method tags (real trades only)
 const _em = t.exit_method || '';
-if (_em === 'sell_fill') tags += tag('SOLD', 'tag-sold', 'sold');
-else if (_em === 'market_expiry') tags += tag('HOLD', 'tag-hold', 'hold');
+if (_em === 'sell_fill') tags += tag('SOLD', 'tag-sold', 'sold', 'exit');
+else if (_em === 'market_expiry') tags += tag('HOLD', 'tag-hold', 'hold', 'exit');
 
 
 // Mode tag
@@ -8897,12 +9073,12 @@ return `<div class="trade-card ${cardCls}" data-tid="${t.id}" role="button" styl
   <div class="tc-header">
     <div>
       <span class="tc-outcome ${o === 'skipped' ? '' : pnlCls}" ${o === 'skipped' ? 'style="color:var(--blue)"' : ''}>${outLabel}</span>
-      ${isReal ? riskTag(riskLvl) : ''}
+      ${isReal ? '<span onclick="event.stopPropagation();_setFilterInclude(\'risk\',\'' + riskLvl + '\')">' + riskTag(riskLvl) + '</span>' : ''}
     </div>
     <span class="tc-pnl ${pnlCls}">${fmtPnl(pnl)}</span>
   </div>
   <div style="display:flex;justify-content:space-between;margin-top:4px">
-    <span class="dim" style="font-size:12px">${regLabel}</span>
+    <span style="font-size:12px;cursor:pointer" onclick="event.stopPropagation();_setFilterInclude('regime','${t.regime_label}')">${regLabel}</span>
     <span class="dim" style="font-size:11px">${marketTime ? marketTime + ' · ' : ''}${t.created_ct || ''}</span>
   </div>
   ${detailHtml}
@@ -9012,9 +9188,10 @@ async function showTradeDetail(tradeId) {
     </div>`;
 
     const _isRealTrade = ['win', 'loss', 'open'].includes(o);
-    html += `<div style="margin-top:6px;display:flex;align-items:center;gap:6px">
-      ${_isRealTrade ? riskTag(riskLvl) : ''} <span style="font-size:12px">${regime}</span>
-    </div>`;
+    html += '<div style="margin-top:6px;display:flex;align-items:center;gap:6px">' +
+      (_isRealTrade ? '<span onclick="event.stopPropagation();_setFilterInclude(\'risk\',\'' + riskLvl + '\')">' + riskTag(riskLvl) + '</span>' : '') +
+      ' <span style="font-size:12px;cursor:pointer" onclick="event.stopPropagation();_setFilterInclude(\'regime\',\'' + t.regime_label + '\')">' + regime + '</span>' +
+    '</div>';
 
     let tags = [];
     if (t.is_ignored) tags.push('IGNORED');
@@ -12881,6 +13058,12 @@ async function togglePush() {
 setTimeout(initPush, 1000);
 
 </script>
+<!-- Filter Sheet -->
+<div class="fs-overlay" id="filterSheetOverlay" onclick="if(event.target===this)closeFilterSheet()"></div>
+<div class="fs-panel" id="filterSheetPanel">
+  <div class="fs-handle" id="filterSheetHandle"></div>
+  <div id="filterSheetContent"></div>
+</div>
 </body>
 </html>"""
 
