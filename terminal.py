@@ -239,7 +239,7 @@ class ClaudeCodeSession:
                "--output-format", "stream-json", "--verbose"]
 
         if self.session_id:
-            cmd.append("--resume")
+            cmd.extend(["--resume", self.session_id])
 
         env = os.environ.copy()
         env.pop("ANTHROPIC_API_KEY", None)
