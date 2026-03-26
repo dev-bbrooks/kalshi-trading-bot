@@ -5782,20 +5782,6 @@ MAIN_HTML = r"""<!DOCTYPE html>
   </div>
 </div>
 
-<!-- Trade Detail Popup -->
-<div class="confirm-overlay" id="tradeDetailOverlay" style="display:none">
-  <div class="modal-panel" style="max-width:560px">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <h3 style="color:var(--blue);font-size:14px;margin:0">Trade Detail</h3>
-      <button onclick="closeModal('tradeDetailOverlay')" style="background:none;border:none;color:var(--dim);font-size:20px;cursor:pointer;padding:10px;margin:-6px;-webkit-tap-highlight-color:transparent"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
-    </div>
-    <div id="tradeDetailContent"></div>
-    <div style="position:relative">
-      <canvas id="tradeDetailChart" style="width:100%;height:100px;border-radius:4px;background:var(--bg);border:1px solid var(--border);margin-top:8px"></canvas>
-      <div id="tradeDetailChartLabel" style="position:absolute;top:12px;left:8px;font-size:11px;font-family:monospace;color:var(--dim);pointer-events:none;background:rgba(13,17,23,0.8);padding:1px 4px;border-radius:3px"></div>
-    </div>
-  </div>
-</div>
 <div class="confirm-overlay" id="deleteOverlay">
   <div class="confirm-box" style="border-color:var(--orange)">
     <h3 style="color:var(--orange)">Delete Trade?</h3>
@@ -5833,6 +5819,21 @@ MAIN_HTML = r"""<!DOCTYPE html>
 
 
 </div> <!-- end contentWrap -->
+
+<!-- Trade Detail Popup (outside contentWrap for reliable fixed positioning on iOS) -->
+<div class="confirm-overlay" id="tradeDetailOverlay" style="display:none">
+  <div class="modal-panel" style="max-width:560px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h3 style="color:var(--blue);font-size:14px;margin:0">Trade Detail</h3>
+      <button onclick="closeModal('tradeDetailOverlay')" style="background:none;border:none;color:var(--dim);font-size:20px;cursor:pointer;padding:10px;margin:-6px;-webkit-tap-highlight-color:transparent"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+    </div>
+    <div id="tradeDetailContent"></div>
+    <div style="position:relative">
+      <canvas id="tradeDetailChart" style="width:100%;height:100px;border-radius:4px;background:var(--bg);border:1px solid var(--border);margin-top:8px"></canvas>
+      <div id="tradeDetailChartLabel" style="position:absolute;top:12px;left:8px;font-size:11px;font-family:monospace;color:var(--dim);pointer-events:none;background:rgba(13,17,23,0.8);padding:1px 4px;border-radius:3px"></div>
+    </div>
+  </div>
+</div>
 
 <!-- Image Lightbox -->
 <div id="imgLightbox" onclick="if(event.target===this)closeLightbox()">
@@ -8590,8 +8591,13 @@ document.getElementById('contentWrap').addEventListener('scroll', function() {
 // Event delegation for trade card taps (more reliable than inline onclick on iOS)
 document.addEventListener('click', function(e) {
   const card = e.target.closest('.trade-card[data-tid]');
-  if (card && !e.target.closest('[onclick*="stopPropagation"]') && !e.target.closest('.tc-tag')) {
-    showTradeDetail(parseInt(card.dataset.tid));
+  if (card && !e.target.closest('.tc-tag')) {
+    const tid = parseInt(card.dataset.tid);
+    if (tid) {
+      showTradeDetail(tid).catch(function(err) {
+        showToast('Tap error: ' + err.message, 'red');
+      });
+    }
   }
 });
 
@@ -8943,7 +8949,7 @@ async function showTradeDetail(tradeId) {
     } else if (canvas) {
       canvas.style.display = 'none';
     }
-  } catch(e) { console.error('Trade detail error:', e); }
+  } catch(e) { console.error('Trade detail error:', e); showToast('Detail error: ' + e.message, 'red'); }
 }
 
 
