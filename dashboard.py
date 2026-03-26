@@ -8535,7 +8535,10 @@ function _renderActiveTrade() {
     </div>`;
   } else if (skip && skip.ticker) {
     const _aShd = state.active_shadow;
-    const _isShadowActive = _aShd && (_aShd.ticker === skip.ticker || _aShd.status === 'pending_fill');
+    const _shdTrade = state.shadow_trade;
+    const _isShadowActive =
+      (_aShd && (_aShd.ticker === skip.ticker || _aShd.status === 'pending_fill')) ||
+      (_shdTrade && _shdTrade.ticker === skip.ticker && _shdTrade.outcome === 'open');
     const key = 'skip|' + skip.ticker + '|' + skip.reason + '|' + ((state.live_market||{}).regime_label||'') + '|' + (_isShadowActive ? 'shd' : '');
     if (key === _lastActiveTradeKey) return;
     _lastActiveTradeKey = key;
