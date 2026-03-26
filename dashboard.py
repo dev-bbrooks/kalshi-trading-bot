@@ -7056,6 +7056,7 @@ async function setTradingMode(mode) {
       _stagedMode = null;
       _syncModeStrip(currentMode);
       _pollSuppressUntil = Date.now() + 2000;
+      renderUI(_uiState);
       saveSetting('trading_mode', currentMode);
       return;
     }
@@ -7063,8 +7064,9 @@ async function setTradingMode(mode) {
     if (!_activeMode) _activeMode = currentMode;
     _stagedMode = mode;
     _pollSuppressUntil = Date.now() + 2000;
-    saveSetting('trading_mode', mode);
     _syncModeStrip(_activeMode);
+    renderUI(_uiState);
+    saveSetting('trading_mode', mode);
     showToast(meta.label + ' queued for next market', mode === 'shadow' ? 'purple' :
               mode === 'hybrid' ? 'teal' : mode === 'auto' ? 'green' : 'blue');
   }
@@ -7351,7 +7353,7 @@ function showToast(msg, color) {
   if (!t) {
     t = document.createElement('div');
     t.id = 'mainToast';
-    t.style.cssText = 'position:fixed;top:env(safe-area-inset-top,48px);left:50%;transform:translateX(-50%);' +
+    t.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);' +
       'padding:6px 14px;border-radius:6px;border:1px solid transparent;' +
       'font-size:13px;font-weight:600;opacity:0;transition:opacity 0.3s;z-index:200;pointer-events:none;' +
       'backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);';
@@ -7367,6 +7369,8 @@ function showToast(msg, color) {
     teal:   {bg: 'rgba(45,212,191,0.12)',  border: 'rgba(45,212,191,0.4)',  fg: '#2dd4bf'},
   };
   const c = colors[color] || colors.green;
+  const _hdr = document.getElementById('stickyHeader');
+  t.style.top = ((_hdr ? _hdr.offsetHeight : 60) + 8) + 'px';
   t.style.background = c.bg;
   t.style.borderColor = c.border;
   t.style.color = c.fg;
