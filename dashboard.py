@@ -7050,11 +7050,12 @@ async function setTradingMode(mode) {
     // Mid-market
     const currentMode = _activeMode || _uiState.trading_mode || 'observe';
     if (mode === _stagedMode) {
-      // De-stage — revert to current mode
+      // De-stage — set local state immediately to avoid async flash
+      _uiState.trading_mode = currentMode;
+      _activeMode = currentMode;
       _stagedMode = null;
-      saveSetting('trading_mode', currentMode);
       _syncModeStrip(currentMode);
-      showToast('Cancelled — staying on ' + (MODE_META[currentMode]||{}).label, 'blue');
+      saveSetting('trading_mode', currentMode);
       return;
     }
     // Stage the new mode — freeze _activeMode at current running mode
@@ -7514,6 +7515,9 @@ function renderUI(s) {
         dotClass = 'dot-red';
         statusColor = 'var(--dim)';
       }
+      if (_stagedMode && _stagedMode !== _displayMode) {
+        statusMain += ' \u2192 ' + (_modeLabels[_stagedMode] || _stagedMode);
+      }
     } else {
       statusMain = _modeLabels[_displayMode] || 'Running';
       dotClass = _modeDots[_displayMode] || 'dot-blue';
@@ -7526,7 +7530,7 @@ function renderUI(s) {
           var _ctM = Math.floor(_ctMs / 60000);
           var _ctS = Math.floor((_ctMs % 60000) / 1000);
           statusMain += ' \u00b7 ' + _ctM + ':' + (_ctS < 10 ? '0' : '') + _ctS;
-          if (_stagedMode && _stagedMode !== tradingMode) {
+          if (_stagedMode && _stagedMode !== _displayMode) {
             statusMain += ' \u2192 ' + (_modeLabels[_stagedMode] || _stagedMode);
           }
         }
