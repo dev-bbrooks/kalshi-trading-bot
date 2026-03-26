@@ -4297,8 +4297,8 @@ MAIN_HTML = r"""<!DOCTYPE html>
     -webkit-tap-highlight-color: transparent; line-height: 1.2; }
   .mode-btn:active { filter: brightness(1.2); }
   .mode-btn .mode-icon { font-size: 11px; display: block; margin-bottom: 1px; opacity: 0.7; }
-  .mode-btn.m-active-observe { background: rgba(227,179,65,0.12); color: var(--yellow);
-    border-color: rgba(227,179,65,0.4); }
+  .mode-btn.m-active-observe { background: rgba(88,166,255,0.12); color: var(--blue);
+    border-color: rgba(88,166,255,0.4); }
   .mode-btn.m-active-shadow { background: rgba(163,113,247,0.12); color: #a371f7;
     border-color: rgba(163,113,247,0.4); }
   .mode-btn.m-active-hybrid { background: rgba(88,166,255,0.12); color: var(--blue);
@@ -6911,7 +6911,7 @@ function toggleObserveOnly(on, skipSave) {
 
 // ── Trading Mode Selector ────────────────────────────────
 const MODE_META = {
-  observe: { label: 'Observe', color: 'var(--yellow)', toast: 'Observe mode — recording data', autoStart: true },
+  observe: { label: 'Observe', color: 'var(--blue)', toast: 'Observe mode — recording data', autoStart: true },
   shadow:  { label: 'Shadow',  color: '#a371f7',       toast: 'Shadow mode — 1-contract trades', autoStart: true },
   hybrid:  { label: 'Hybrid',  color: 'var(--blue)',    toast: 'Hybrid mode — auto + shadow fallback', autoStart: true },
   auto:    { label: 'Auto',    color: 'var(--green)',   toast: 'Auto mode — full trades only', autoStart: false },
@@ -6946,7 +6946,7 @@ async function setTradingMode(mode) {
   }
   // Update strategy picker lock state
   _updateAutoStrategyLock();
-  const toastColor = mode === 'observe' ? 'yellow' : mode === 'shadow' ? 'purple' :
+  const toastColor = mode === 'observe' ? 'blue' : mode === 'shadow' ? 'purple' :
                      mode === 'hybrid' ? 'blue' : mode === 'auto' ? 'green' : 'yellow';
   showToast(meta.toast, toastColor);
   setTimeout(pollState, 800);
@@ -7371,8 +7371,8 @@ function renderUI(s) {
       }
     }
 
-    const _modeColors = {observe:'var(--yellow)',shadow:'#a371f7',hybrid:'var(--blue)',auto:'var(--green)',manual:'var(--text)'};
-    const _modeDots = {observe:'dot-yellow',shadow:'dot-purple',hybrid:'dot-blue',auto:'dot-green',manual:'dot-yellow'};
+    const _modeColors = {observe:'var(--blue)',shadow:'#a371f7',hybrid:'var(--blue)',auto:'var(--green)',manual:'var(--text)'};
+    const _modeDots = {observe:'dot-blue',shadow:'dot-purple',hybrid:'dot-blue',auto:'dot-green',manual:'dot-yellow'};
     const _modeLabels = {observe:'Observing',shadow:'Shadow',hybrid:'Hybrid',auto:'Auto',manual:'Manual'};
 
     if (_botStale) {
