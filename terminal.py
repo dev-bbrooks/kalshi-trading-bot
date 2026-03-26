@@ -441,44 +441,227 @@ TERMINAL_HTML = r"""<!DOCTYPE html>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { height: 100%; overflow: hidden; background: #0a0a0a; }
-  #terminal-container {
-    width: 100%; height: 100dvh; padding: 0;
-    display: flex; flex-direction: column;
+  html, body { height: 100%; overflow: hidden; background: #0a0a0a; color: #e0e0e0;
+    font-family: system-ui, -apple-system, sans-serif; }
+
+  #app { width: 100%; height: 100dvh; display: flex; flex-direction: column; }
+
+  /* ── Header ── */
+  #header {
+    height: 44px; padding: 0 12px; background: #111; border-bottom: 1px solid #333;
+    display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
   }
-  #status-bar {
-    height: 28px; line-height: 28px; padding: 0 10px;
-    background: #1a1a2e; color: #888; font-size: 12px;
-    font-family: -apple-system, system-ui, sans-serif;
-    display: flex; justify-content: space-between; align-items: center;
-    flex-shrink: 0;
+  #header .title { font-size: 14px; font-weight: 600; color: #e0e0e0; }
+  #header .status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #888; }
+  #header .status .dot {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
   }
-  #status-bar .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
-  .dot-connected { background: #00d26a; }
-  .dot-disconnected { background: #f44; }
-  .dot-connecting { background: #f90; animation: pulse 1s infinite; }
+  .dot-ready { background: #22c55e; }
+  .dot-busy { background: #f59e0b; animation: pulse 1s infinite; }
+  .dot-dead, .dot-disconnected { background: #ef4444; }
+  .dot-none { background: #555; }
   @keyframes pulse { 50% { opacity: 0.4; } }
-  #terminal-wrap { flex: 1; min-height: 0; position: relative; }
+  #new-session-btn {
+    background: none; border: 1px solid #444; color: #888; font-size: 12px;
+    padding: 4px 10px; border-radius: 6px; cursor: pointer;
+  }
+  #new-session-btn:active { background: #222; }
+
+  /* ── Tab bar ── */
+  #tabs {
+    display: flex; background: #111; border-bottom: 1px solid #333; flex-shrink: 0;
+  }
+  .tab {
+    flex: 1; padding: 10px 0; text-align: center; font-size: 13px; font-weight: 500;
+    color: #666; cursor: pointer; border-bottom: 2px solid transparent;
+    transition: color 0.15s, border-color 0.15s; -webkit-tap-highlight-color: transparent;
+  }
+  .tab.active { color: #4a9eff; border-bottom-color: #4a9eff; }
+
+  /* ── Panels ── */
+  #panels { flex: 1; min-height: 0; position: relative; }
+  .panel { position: absolute; inset: 0; display: none; flex-direction: column; }
+  .panel.active { display: flex; }
+
+  /* ── Claude panel ── */
+  #claude-panel { background: #0a0a0a; }
+  #conversation {
+    flex: 1; overflow-y: auto; padding: 12px; overscroll-behavior: none;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .msg { max-width: 88%; padding: 10px 14px; border-radius: 16px; font-size: 15px;
+    line-height: 1.5; word-wrap: break-word; position: relative; }
+  .msg-user {
+    align-self: flex-end; background: #1a1a2e; border-bottom-right-radius: 4px;
+    white-space: pre-wrap;
+  }
+  .msg-assistant {
+    align-self: flex-start; background: #1a1a1a; border-bottom-left-radius: 4px;
+  }
+  .msg-assistant pre {
+    background: #0d0d0d; border: 1px solid #333; border-radius: 8px;
+    padding: 10px; margin: 8px 0; overflow-x: auto; font-size: 13px;
+    font-family: 'SF Mono', Menlo, Monaco, monospace; white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+  .msg-assistant code {
+    font-family: 'SF Mono', Menlo, Monaco, monospace; font-size: 13px;
+    background: #1e1e1e; padding: 1px 5px; border-radius: 4px;
+  }
+  .msg-assistant pre code { background: none; padding: 0; }
+  .msg-assistant strong { color: #f0f0f0; }
+  .copy-btn {
+    position: absolute; top: 6px; right: 6px; background: rgba(255,255,255,0.08);
+    border: none; color: #888; font-size: 11px; padding: 3px 8px; border-radius: 6px;
+    cursor: pointer; opacity: 0; transition: opacity 0.15s;
+  }
+  .msg-assistant:hover .copy-btn, .msg-assistant:active .copy-btn { opacity: 1; }
+  .copy-btn.copied { color: #22c55e; }
+
+  /* ── Activity card ── */
+  .activity-card {
+    align-self: flex-start; max-width: 88%; padding: 8px 14px; border-radius: 12px;
+    background: #1a1a1a; border: 1px solid #2a2a2a; font-size: 13px; color: #aaa;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .activity-card .spinner {
+    width: 8px; height: 8px; border-radius: 50%; background: #f59e0b;
+    animation: pulse 1s infinite; flex-shrink: 0;
+  }
+  .activity-collapsed {
+    font-size: 12px; color: #555; cursor: pointer; align-self: flex-start;
+    padding: 2px 0; margin-top: -8px;
+  }
+  .activity-collapsed:hover { color: #888; }
+  .activity-log {
+    display: none; align-self: flex-start; max-width: 88%; padding: 8px 12px;
+    background: #111; border-radius: 8px; font-size: 12px; color: #777;
+    font-family: monospace; white-space: pre-wrap; margin-top: -8px;
+  }
+
+  /* ── Error / restart ── */
+  .msg-error {
+    align-self: center; background: #2a1515; border: 1px solid #4a2020;
+    color: #ef4444; border-radius: 8px; padding: 10px 16px; font-size: 13px;
+    text-align: center;
+  }
+  .msg-error button {
+    background: #ef4444; color: #fff; border: none; padding: 6px 14px;
+    border-radius: 6px; margin-top: 8px; cursor: pointer; font-size: 13px;
+  }
+
+  /* ── Session divider ── */
+  .session-divider {
+    text-align: center; color: #444; font-size: 11px; padding: 8px 0;
+    border-top: 1px solid #222; margin-top: 4px;
+  }
+
+  /* ── Input area ── */
+  #input-area {
+    padding: 8px 12px; padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+    background: #111; border-top: 1px solid #333; display: flex; gap: 8px;
+    align-items: flex-end; flex-shrink: 0;
+  }
+  #claude-paste-btn {
+    width: 44px; height: 44px; border-radius: 10px; border: none;
+    background: #1a1a1a; color: #888; font-size: 20px; cursor: pointer;
+    flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  }
+  #claude-paste-btn:active { background: #2a2a2a; }
+  #prompt-input {
+    flex: 1; background: #1a1a1a; border: 1px solid #333; border-radius: 12px;
+    color: #e0e0e0; font-size: 16px; padding: 10px 14px; resize: none;
+    font-family: system-ui, -apple-system, sans-serif; line-height: 1.4;
+    min-height: 44px; max-height: 45vh; overflow-y: auto;
+  }
+  #prompt-input::placeholder { color: #555; }
+  #prompt-input:focus { outline: none; border-color: #4a9eff; }
+  #send-btn {
+    width: 44px; height: 44px; border-radius: 10px; border: none;
+    background: #4a9eff; color: #fff; font-size: 20px; cursor: pointer;
+    flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s;
+  }
+  #send-btn:disabled { background: #333; color: #666; cursor: default; }
+  #send-btn.stop-btn { background: #ef4444; }
+
+  /* ── Shell panel ── */
+  #shell-panel { background: #0a0a0a; }
+  #shell-wrap { flex: 1; min-height: 0; position: relative; }
   .xterm { height: 100%; }
-  #paste-btn {
+  #shell-paste-btn {
     position: absolute; bottom: 16px; right: 16px; z-index: 10;
     width: 40px; height: 40px; border-radius: 50%; border: none;
     background: rgba(255,255,255,0.1); color: #c9d1d9; font-size: 18px;
     cursor: pointer; display: flex; align-items: center; justify-content: center;
     backdrop-filter: blur(4px); transition: background 0.2s;
   }
-  #paste-btn:hover { background: rgba(255,255,255,0.2); }
-  #paste-btn:active { background: rgba(255,255,255,0.3); }
+  #shell-paste-btn:hover { background: rgba(255,255,255,0.2); }
+
+  /* ── Log panel ── */
+  #log-panel { background: #0a0a0a; }
+  #log-header {
+    padding: 8px 12px; display: flex; justify-content: space-between; align-items: center;
+    border-bottom: 1px solid #222; flex-shrink: 0;
+  }
+  #log-header span { font-size: 12px; color: #666; }
+  #log-clear-btn {
+    background: none; border: 1px solid #333; color: #666; font-size: 11px;
+    padding: 3px 10px; border-radius: 4px; cursor: pointer;
+  }
+  #log-content {
+    flex: 1; overflow-y: auto; padding: 8px 12px; font-family: 'SF Mono', Menlo, Monaco, monospace;
+    font-size: 12px; color: #888; white-space: pre-wrap; word-wrap: break-word;
+    overscroll-behavior: none;
+  }
 </style>
 </head>
 <body>
-<div id="terminal-container">
-  <div id="status-bar">
-    <span><span id="status-dot" class="dot dot-connecting"></span><span id="status-text">Connecting…</span></span>
-    <span id="status-info">trading-platform</span>
+<div id="app">
+  <!-- Header -->
+  <div id="header">
+    <span class="title">Claude Code</span>
+    <span class="status">
+      <span id="claude-dot" class="dot dot-none"></span>
+      <span id="claude-status-text">Idle</span>
+    </span>
+    <button id="new-session-btn">New Session</button>
   </div>
-  <div id="terminal-wrap">
-    <button id="paste-btn" title="Paste from clipboard">&#x1F4CB;</button>
+
+  <!-- Tabs -->
+  <div id="tabs">
+    <div class="tab active" data-tab="claude">Claude</div>
+    <div class="tab" data-tab="shell">Shell</div>
+    <div class="tab" data-tab="log">Log</div>
+  </div>
+
+  <!-- Panels -->
+  <div id="panels">
+    <!-- Claude panel -->
+    <div id="claude-panel" class="panel active">
+      <div id="conversation"></div>
+      <div id="input-area">
+        <button id="claude-paste-btn" title="Paste">&#x1F4CB;</button>
+        <textarea id="prompt-input" rows="1" placeholder="Send a prompt to Claude Code..."></textarea>
+        <button id="send-btn" title="Send">&#x2191;</button>
+      </div>
+    </div>
+
+    <!-- Shell panel -->
+    <div id="shell-panel" class="panel">
+      <div id="shell-wrap">
+        <button id="shell-paste-btn" title="Paste from clipboard">&#x1F4CB;</button>
+      </div>
+    </div>
+
+    <!-- Log panel -->
+    <div id="log-panel" class="panel">
+      <div id="log-header">
+        <span>Raw Claude Code Output</span>
+        <button id="log-clear-btn">Clear</button>
+      </div>
+      <div id="log-content"></div>
+    </div>
   </div>
 </div>
 
@@ -488,40 +671,26 @@ TERMINAL_HTML = r"""<!DOCTYPE html>
 <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4.7.2/dist/socket.io.min.js"></script>
 <script>
 (function() {
-  var term = new Terminal({
-    cursorBlink: true,
-    fontSize: 16,
-    fontFamily: '"SF Mono", "Menlo", "Monaco", "Courier New", monospace',
-    theme: {
-      background: '#0a0a0a',
-      foreground: '#c9d1d9',
-      cursor: '#58a6ff',
-      selectionBackground: '#264f78',
-      black: '#0d1117', red: '#ff7b72', green: '#7ee787', yellow: '#d29922',
-      blue: '#58a6ff', magenta: '#bc8cff', cyan: '#39c5cf', white: '#c9d1d9',
-      brightBlack: '#484f58', brightRed: '#ffa198', brightGreen: '#56d364',
-      brightYellow: '#e3b341', brightBlue: '#79c0ff', brightMagenta: '#d2a8ff',
-      brightCyan: '#56d4dd', brightWhite: '#f0f6fc'
-    },
-    allowProposedApi: true,
-    scrollback: 5000
-  });
+  // ═══════════════════════════════════════════════════
+  //  TAB SWITCHING
+  // ═══════════════════════════════════════════════════
+  var tabs = document.querySelectorAll('.tab');
+  var panels = document.querySelectorAll('.panel');
+  var currentTab = 'claude';
+  var shellInitialized = false;
 
-  var fitAddon = new FitAddon.FitAddon();
-  var webLinksAddon = new WebLinksAddon.WebLinksAddon();
-  term.loadAddon(fitAddon);
-  term.loadAddon(webLinksAddon);
-  term.open(document.getElementById('terminal-wrap'));
-  fitAddon.fit();
-
-  var dot = document.getElementById('status-dot');
-  var stxt = document.getElementById('status-text');
-
-  function setStatus(state, text) {
-    dot.className = 'dot dot-' + state;
-    stxt.textContent = text;
+  function switchTab(name) {
+    currentTab = name;
+    tabs.forEach(function(t) { t.classList.toggle('active', t.dataset.tab === name); });
+    panels.forEach(function(p) { p.classList.toggle('active', p.id === name + '-panel'); });
+    if (name === 'shell' && !shellInitialized) initShell();
+    if (name === 'shell' && shellInitialized) { fitAddon.fit(); term.focus(); }
   }
+  tabs.forEach(function(t) { t.addEventListener('click', function() { switchTab(t.dataset.tab); }); });
 
+  // ═══════════════════════════════════════════════════
+  //  WEBSOCKET
+  // ═══════════════════════════════════════════════════
   var socket = io('/terminal/ws', {
     path: '/terminal/ws/socket.io',
     transports: ['websocket'],
@@ -530,70 +699,375 @@ TERMINAL_HTML = r"""<!DOCTYPE html>
     reconnectionDelayMax: 5000
   });
 
+  // ═══════════════════════════════════════════════════
+  //  SHELL MODE (lazy init)
+  // ═══════════════════════════════════════════════════
+  var term, fitAddon;
+
+  function initShell() {
+    if (shellInitialized) return;
+    shellInitialized = true;
+
+    term = new Terminal({
+      cursorBlink: true, fontSize: 16,
+      fontFamily: '"SF Mono", Menlo, Monaco, "Courier New", monospace',
+      theme: {
+        background: '#0a0a0a', foreground: '#c9d1d9', cursor: '#58a6ff',
+        selectionBackground: '#264f78',
+        black: '#0d1117', red: '#ff7b72', green: '#7ee787', yellow: '#d29922',
+        blue: '#58a6ff', magenta: '#bc8cff', cyan: '#39c5cf', white: '#c9d1d9',
+        brightBlack: '#484f58', brightRed: '#ffa198', brightGreen: '#56d364',
+        brightYellow: '#e3b341', brightBlue: '#79c0ff', brightMagenta: '#d2a8ff',
+        brightCyan: '#56d4dd', brightWhite: '#f0f6fc'
+      },
+      allowProposedApi: true, scrollback: 5000
+    });
+
+    fitAddon = new FitAddon.FitAddon();
+    term.loadAddon(fitAddon);
+    term.loadAddon(new WebLinksAddon.WebLinksAddon());
+    term.open(document.getElementById('shell-wrap'));
+    fitAddon.fit();
+
+    term.onData(function(data) { socket.emit('input', data); });
+
+    var ro = new ResizeObserver(function() {
+      if (currentTab === 'shell') {
+        fitAddon.fit();
+        var d = fitAddon.proposeDimensions();
+        if (d) socket.emit('resize', {rows: d.rows, cols: d.cols});
+      }
+    });
+    ro.observe(document.getElementById('shell-wrap'));
+  }
+
+  // Shell socket events
   socket.on('connect', function() {
-    setStatus('connected', 'Connected');
-    var dims = fitAddon.proposeDimensions();
-    if (dims) socket.emit('resize', {rows: dims.rows, cols: dims.cols});
+    if (shellInitialized) {
+      var d = fitAddon.proposeDimensions();
+      if (d) socket.emit('resize', {rows: d.rows, cols: d.cols});
+    }
   });
-
-  socket.on('output', function(data) {
-    term.write(data);
-  });
-
+  socket.on('output', function(data) { if (term) term.write(data); });
   socket.on('exit', function() {
-    term.write('\r\n\x1b[33m[shell exited — reconnecting…]\x1b[0m\r\n');
+    if (term) term.write('\r\n\x1b[33m[shell exited — reconnecting...]\x1b[0m\r\n');
     setTimeout(function() { socket.disconnect(); socket.connect(); }, 1000);
+  });
+  socket.on('reconnect', function() { if (term) term.clear(); });
+
+  window.addEventListener('resize', function() {
+    if (shellInitialized && currentTab === 'shell') {
+      fitAddon.fit();
+      var d = fitAddon.proposeDimensions();
+      if (d) socket.emit('resize', {rows: d.rows, cols: d.cols});
+    }
+  });
+
+  // Shell paste button
+  document.getElementById('shell-paste-btn').addEventListener('click', function() {
+    if (navigator.clipboard && navigator.clipboard.readText) {
+      navigator.clipboard.readText().then(function(t) { if (t && term) term.paste(t); }).catch(function(){});
+    }
+  });
+
+  // ═══════════════════════════════════════════════════
+  //  MARKDOWN RENDERER (lightweight)
+  // ═══════════════════════════════════════════════════
+  function renderMd(text) {
+    // Escape HTML first
+    var h = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    // Code blocks: ```lang\n...\n```
+    h = h.replace(/```(\w*)\n([\s\S]*?)```/g, function(_, lang, code) {
+      return '<pre><code>' + code.replace(/\n$/, '') + '</code></pre>';
+    });
+    // Inline code
+    h = h.replace(/`([^`]+)`/g, '<code>$1</code>');
+    // Bold
+    h = h.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    // Line breaks
+    h = h.replace(/\n/g, '<br>');
+    // Fix: remove <br> inside <pre>
+    h = h.replace(/<pre><code>([\s\S]*?)<\/code><\/pre>/g, function(_, code) {
+      return '<pre><code>' + code.replace(/<br>/g, '\n') + '</code></pre>';
+    });
+    return h;
+  }
+
+  // ═══════════════════════════════════════════════════
+  //  CLAUDE MODE
+  // ═══════════════════════════════════════════════════
+  var conv = document.getElementById('conversation');
+  var promptInput = document.getElementById('prompt-input');
+  var sendBtn = document.getElementById('send-btn');
+  var claudeDot = document.getElementById('claude-dot');
+  var claudeStatusText = document.getElementById('claude-status-text');
+  var logContent = document.getElementById('log-content');
+
+  var claudeState = 'none'; // none, ready, busy, dead
+  var claudeSessionStarting = false;
+  var activityCard = null;
+  var activityLog = [];
+  var autoScroll = true;
+
+  function setClaudeState(state) {
+    claudeState = state;
+    claudeDot.className = 'dot dot-' + state;
+    var labels = {none:'Idle', ready:'Ready', busy:'Working...', dead:'Disconnected'};
+    claudeStatusText.textContent = labels[state] || state;
+    updateSendBtn();
+  }
+
+  function updateSendBtn() {
+    if (claudeState === 'busy') {
+      sendBtn.textContent = '\u25A0'; // stop square
+      sendBtn.classList.add('stop-btn');
+      sendBtn.disabled = false;
+    } else {
+      sendBtn.textContent = '\u2191'; // up arrow
+      sendBtn.classList.remove('stop-btn');
+      sendBtn.disabled = !promptInput.value.trim();
+    }
+  }
+
+  // Auto-scroll detection
+  conv.addEventListener('scroll', function() {
+    autoScroll = conv.scrollTop + conv.clientHeight >= conv.scrollHeight - 30;
+  });
+  function scrollToBottom() {
+    if (autoScroll) conv.scrollTop = conv.scrollHeight;
+  }
+
+  // Add message bubble
+  function addUserMsg(text) {
+    var el = document.createElement('div');
+    el.className = 'msg msg-user';
+    el.textContent = text;
+    conv.appendChild(el);
+    scrollToBottom();
+  }
+
+  function addAssistantMsg(text, rawText) {
+    var el = document.createElement('div');
+    el.className = 'msg msg-assistant';
+    el.innerHTML = renderMd(text);
+    // Copy button
+    var btn = document.createElement('button');
+    btn.className = 'copy-btn';
+    btn.textContent = 'Copy';
+    btn.addEventListener('click', function() {
+      navigator.clipboard.writeText(rawText || text).then(function() {
+        btn.textContent = 'Copied!';
+        btn.classList.add('copied');
+        setTimeout(function() { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);
+      }).catch(function(){});
+    });
+    el.appendChild(btn);
+    conv.appendChild(el);
+    scrollToBottom();
+  }
+
+  function addError(text, showRestart) {
+    var el = document.createElement('div');
+    el.className = 'msg-error';
+    el.textContent = text;
+    if (showRestart) {
+      var btn = document.createElement('button');
+      btn.textContent = 'Restart Session';
+      btn.addEventListener('click', function() { startSession(); });
+      el.appendChild(document.createElement('br'));
+      el.appendChild(btn);
+    }
+    conv.appendChild(el);
+    scrollToBottom();
+  }
+
+  function showActivityCard() {
+    activityLog = [];
+    activityCard = document.createElement('div');
+    activityCard.className = 'activity-card';
+    activityCard.innerHTML = '<span class="spinner"></span><span class="activity-text">Thinking...</span>';
+    conv.appendChild(activityCard);
+    scrollToBottom();
+  }
+
+  function updateActivityCard(text) {
+    if (!activityCard) return;
+    activityLog.push(text);
+    var t = activityCard.querySelector('.activity-text');
+    if (t) t.textContent = text;
+    scrollToBottom();
+  }
+
+  function collapseActivityCard() {
+    if (!activityCard) return;
+    var card = activityCard;
+    activityCard = null;
+    card.remove();
+    if (activityLog.length > 0) {
+      var toggle = document.createElement('div');
+      toggle.className = 'activity-collapsed';
+      toggle.textContent = '\u25B6 View activity (' + activityLog.length + ' steps)';
+      var logEl = document.createElement('div');
+      logEl.className = 'activity-log';
+      logEl.textContent = activityLog.join('\n');
+      toggle.addEventListener('click', function() {
+        var open = logEl.style.display === 'block';
+        logEl.style.display = open ? 'none' : 'block';
+        toggle.textContent = (open ? '\u25B6' : '\u25BC') + ' View activity (' + activityLog.length + ' steps)';
+      });
+      conv.appendChild(toggle);
+      conv.appendChild(logEl);
+    }
+    scrollToBottom();
+  }
+
+  function addSessionDivider() {
+    var el = document.createElement('div');
+    el.className = 'session-divider';
+    el.textContent = '— New Session —';
+    conv.appendChild(el);
+    scrollToBottom();
+  }
+
+  // ── Session management ──
+  function startSession(thenSend) {
+    claudeSessionStarting = true;
+    socket.emit('claude_start');
+    // Wait for ready, then optionally send
+    if (thenSend) {
+      var handler = function(d) {
+        if (d.state === 'ready') {
+          socket.off('claude_state', handler);
+          claudeSessionStarting = false;
+          sendPrompt(thenSend);
+        }
+      };
+      socket.on('claude_state', handler);
+      // Timeout fallback
+      setTimeout(function() { socket.off('claude_state', handler); claudeSessionStarting = false; }, 15000);
+    }
+  }
+
+  function sendPrompt(text) {
+    addUserMsg(text);
+    showActivityCard();
+    socket.emit('claude_prompt', {text: text});
+  }
+
+  // ── Send / stop button ──
+  function handleSend() {
+    if (claudeState === 'busy') {
+      socket.emit('claude_stop');
+      return;
+    }
+    var text = promptInput.value.trim();
+    if (!text) return;
+    promptInput.value = '';
+    autoResizeInput();
+    updateSendBtn();
+    if (claudeState === 'none' || claudeState === 'dead') {
+      startSession(text);
+    } else {
+      sendPrompt(text);
+    }
+  }
+
+  sendBtn.addEventListener('click', handleSend);
+  promptInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  });
+  promptInput.addEventListener('input', function() {
+    autoResizeInput();
+    updateSendBtn();
+  });
+
+  function autoResizeInput() {
+    promptInput.style.height = 'auto';
+    promptInput.style.height = Math.min(promptInput.scrollHeight, window.innerHeight * 0.45) + 'px';
+  }
+
+  // New session button
+  document.getElementById('new-session-btn').addEventListener('click', function() {
+    if (claudeState === 'busy' || claudeState === 'ready') {
+      socket.emit('claude_stop');
+    }
+    setClaudeState('none');
+    addSessionDivider();
+  });
+
+  // Claude paste button
+  document.getElementById('claude-paste-btn').addEventListener('click', function() {
+    if (navigator.clipboard && navigator.clipboard.readText) {
+      navigator.clipboard.readText().then(function(t) {
+        if (t) {
+          promptInput.value += t;
+          autoResizeInput();
+          updateSendBtn();
+          promptInput.focus();
+        }
+      }).catch(function(){});
+    }
+  });
+
+  // ── Claude WebSocket events ──
+  socket.on('claude_state', function(d) {
+    if (d.state === 'ready') {
+      if (claudeState === 'busy') {
+        collapseActivityCard();
+      }
+      setClaudeState('ready');
+    } else if (d.state === 'busy') {
+      setClaudeState('busy');
+    } else if (d.state === 'dead') {
+      collapseActivityCard();
+      setClaudeState('dead');
+    }
+  });
+
+  socket.on('claude_status', function(d) {
+    updateActivityCard(d.text);
+  });
+
+  socket.on('claude_response', function(d) {
+    collapseActivityCard();
+    addAssistantMsg(d.text, d.text);
+  });
+
+  socket.on('claude_error', function(d) {
+    collapseActivityCard();
+    addError(d.text + (d.detail ? ': ' + d.detail : ''), true);
+    if (claudeState === 'busy') setClaudeState('dead');
+  });
+
+  socket.on('claude_raw', function(d) {
+    // Append to log panel
+    logContent.textContent += d.data;
+    // Auto-scroll log
+    logContent.scrollTop = logContent.scrollHeight;
   });
 
   socket.on('disconnect', function() {
-    setStatus('disconnected', 'Disconnected');
-  });
-
-  socket.on('reconnecting', function() {
-    setStatus('connecting', 'Reconnecting…');
+    if (claudeState !== 'none') setClaudeState('dead');
   });
 
   socket.on('reconnect', function() {
-    setStatus('connected', 'Connected');
-    term.clear();
-  });
-
-  term.onData(function(data) {
-    socket.emit('input', data);
-  });
-
-  window.addEventListener('resize', function() {
-    fitAddon.fit();
-    var dims = fitAddon.proposeDimensions();
-    if (dims) socket.emit('resize', {rows: dims.rows, cols: dims.cols});
-  });
-
-  new ResizeObserver(function() {
-    fitAddon.fit();
-    var dims = fitAddon.proposeDimensions();
-    if (dims) socket.emit('resize', {rows: dims.rows, cols: dims.cols});
-  }).observe(document.getElementById('terminal-wrap'));
-
-  // ── Claude Code test helpers (console accessible) ──
-  socket.on('claude_raw', function(d) { console.log('[claude_raw]', d.data); });
-  socket.on('claude_status', function(d) { console.log('[claude_status]', d.type, d.text); });
-  socket.on('claude_response', function(d) { console.log('[claude_response]', d.text); });
-  socket.on('claude_state', function(d) { console.log('[claude_state]', d.state, d.session_id); });
-  socket.on('claude_error', function(d) { console.log('[claude_error]', d.text, d.detail||''); });
-
-  window.claudeTest = {
-    start: function() { socket.emit('claude_start'); },
-    prompt: function(t) { socket.emit('claude_prompt', {text: t}); },
-    stop: function() { socket.emit('claude_stop'); }
-  };
-
-  document.getElementById('paste-btn').addEventListener('click', function() {
-    if (navigator.clipboard && navigator.clipboard.readText) {
-      navigator.clipboard.readText().then(function(text) {
-        if (text) { term.paste(text); }
-      }).catch(function() {});
+    // Session is gone after reconnect
+    if (claudeState !== 'none') {
+      setClaudeState('none');
+      addError('Connection lost. Session ended.', true);
     }
   });
+
+  // Log clear button
+  document.getElementById('log-clear-btn').addEventListener('click', function() {
+    logContent.textContent = '';
+  });
+
+  // Init
+  updateSendBtn();
 })();
 </script>
 </body>
