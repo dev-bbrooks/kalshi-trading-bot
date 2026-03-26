@@ -7055,12 +7055,14 @@ async function setTradingMode(mode) {
       _activeMode = currentMode;
       _stagedMode = null;
       _syncModeStrip(currentMode);
+      _pollSuppressUntil = Date.now() + 2000;
       saveSetting('trading_mode', currentMode);
       return;
     }
     // Stage the new mode — freeze _activeMode at current running mode
     if (!_activeMode) _activeMode = currentMode;
     _stagedMode = mode;
+    _pollSuppressUntil = Date.now() + 2000;
     saveSetting('trading_mode', mode);
     _syncModeStrip(_activeMode);
     showToast(meta.label + ' queued for next market', mode === 'shadow' ? 'purple' :
@@ -7427,11 +7429,17 @@ function patchUI(partial) {
 
 // ── State polling ────────────────────────────────────────
 let _polling = false;
+var _pollSuppressUntil = 0;
+
 async function pollState() {
   if (_polling) return;
+  if (Date.now() < _pollSuppressUntil) return;
   _polling = true;
   try {
     const s = await api('/api/state');
+    if (_stagedMode && _activeMode) {
+      s.trading_mode = _activeMode;
+    }
     _uiState = s;
     lastStateData._lastState = s;
     renderUI(s);
