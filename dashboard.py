@@ -3361,6 +3361,14 @@ def api_system_stats():
     return jsonify(stats)
 
 
+def _report_dir():
+    """Return path to reports directory, creating it if needed."""
+    import os
+    d = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'reports')
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
 @app.route("/api/export/ai-analysis", methods=["POST"])
 @requires_auth
 def api_export_ai_analysis():
