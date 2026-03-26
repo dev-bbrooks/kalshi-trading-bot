@@ -4855,9 +4855,9 @@ MAIN_HTML = r"""<!DOCTYPE html>
     <div class="mode-btn" data-mode="hybrid" onclick="setTradingMode('hybrid')">
       <span class="mode-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/></svg></span>Hybrid</div>
     <div class="mode-btn" data-mode="auto" onclick="setTradingMode('auto')">
-      <span class="mode-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg></span>Auto</div>
+      <span class="mode-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 12a9 9 0 01-9 9m0 0l3-3m-3 3l-3-3M3 12a9 9 0 019-9m0 0l-3 3m3-3l3 3"/></svg></span>Auto</div>
     <div class="mode-btn" data-mode="manual" onclick="setTradingMode('manual')">
-      <span class="mode-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 8V6a2 2 0 00-4 0v1M14 8V5a2 2 0 00-4 0v3M10 8V4a2 2 0 00-4 0v9l-1.8-1.8a2 2 0 00-2.8 2.8L7 20.5A6 6 0 0012 23h3a6 6 0 006-6v-5a2 2 0 00-4 0v-1a2 2 0 00-4 0v-3z"/></svg></span>Manual</div>
+      <span class="mode-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l7.07 17 2.51-7.39L21 11.07z"/></svg></span>Manual</div>
   </div>
 </div>
 <div class="bot-offline-banner" id="offlineBanner">
@@ -6997,6 +6997,7 @@ const MODE_META = {
 };
 
 var _stagedMode = null;
+var _activeMode = null;
 
 function _syncModeStrip(activeMode) {
   const staged = _stagedMode;
@@ -7031,6 +7032,7 @@ async function setTradingMode(mode) {
   if (!midMarket) {
     // Between markets — apply immediately, clear staged
     _stagedMode = null;
+    _activeMode = mode;
     _syncModeStrip(mode);
     await saveSetting('trading_mode', mode);
     _uiState.trading_mode = mode;
@@ -7045,7 +7047,7 @@ async function setTradingMode(mode) {
     setTimeout(pollState, 800);
   } else {
     // Mid-market
-    const currentMode = _uiState.trading_mode || 'observe';
+    const currentMode = _activeMode || _uiState.trading_mode || 'observe';
     if (mode === currentMode && !_stagedMode) return;
     if (mode === _stagedMode) {
       // De-stage — revert to current mode
@@ -7055,10 +7057,11 @@ async function setTradingMode(mode) {
       showToast('Cancelled — staying on ' + (MODE_META[currentMode]||{}).label, 'blue');
       return;
     }
-    // Stage the new mode
+    // Stage the new mode — freeze _activeMode at current running mode
+    if (!_activeMode) _activeMode = currentMode;
     _stagedMode = mode;
     saveSetting('trading_mode', mode);
-    _syncModeStrip(currentMode);
+    _syncModeStrip(_activeMode);
     showToast(meta.label + ' queued for next market', mode === 'shadow' ? 'purple' :
               mode === 'hybrid' ? 'teal' : mode === 'auto' ? 'green' : 'blue');
   }
@@ -7456,7 +7459,13 @@ function renderUI(s) {
     const tradingMode = s.trading_mode || 'observe';
 
     // Sync mode strip highlight
-    _syncModeStrip(tradingMode);
+    if (_stagedMode && (s.live_market || {}).ticker && _activeMode) {
+      // Mid-market with staged mode — keep active mode visually bold
+      _syncModeStrip(_activeMode);
+    } else {
+      if (!_stagedMode) _activeMode = tradingMode;
+      _syncModeStrip(tradingMode);
+    }
 
     // ── Build rich status text ──
     const detail = s.status_detail || '';
@@ -7823,7 +7832,7 @@ function renderUI(s) {
           // Only arm timer if this is a genuinely new market, not stale data re-populating
           lastStateData._monEndFired = (lastStateData._monFiredForClose === lm.close_time);
           // Clear staged mode — new market means the staged mode has taken effect
-          if (_stagedMode) { _stagedMode = null; _syncModeStrip(tradingMode); }
+          if (_stagedMode) { _stagedMode = null; _activeMode = tradingMode; _syncModeStrip(tradingMode); }
         }
         tickCountdown('monTime', lm.close_time);
 
