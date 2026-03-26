@@ -40,6 +40,7 @@ from plugins.btc_15m.notifications import (
 log = logging.getLogger("bot")
 
 PLUGIN_ID = "btc_15m"
+SHADOW_DEFAULT_STRATEGY = "cheaper:early:45:90"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1556,12 +1557,21 @@ def _run_one_market(client: KalshiClient, cfg: dict) -> bool:
                                  snapshot.get("volume_regime") if snapshot else None,
                              ))
 
-    # Observe/shadow: don't place real trades
-    if _trading_mode in ("observe", "shadow") and gate["should_trade"]:
+    # Observe: don't place real trades
+    if _trading_mode == "observe" and gate["should_trade"]:
         gate = {
             "should_trade": False,
             "is_data_collection": False,
-            "reason": "Observe-only mode" if _trading_mode == "observe" else "Shadow mode",
+            "reason": "Observe-only mode",
+            "risk_level": gate["risk_level"],
+        }
+
+    # Shadow: bypass regime gate — always route to skip path for shadow trade
+    if _trading_mode == "shadow":
+        gate = {
+            "should_trade": False,
+            "is_data_collection": False,
+            "reason": f"Shadow mode (regime: {gate.get('reason', regime_label)})",
             "risk_level": gate["risk_level"],
         }
 
@@ -1723,13 +1733,22 @@ def _run_one_market(client: KalshiClient, cfg: dict) -> bool:
                     vol_regime=snapshot.get("vol_regime") if snapshot else None,
                     trend_regime=snapshot.get("trend_regime") if snapshot else None,
                 )
-                if _sh_rec:
-                    _sh_side_rule = _sh_rec["side_rule"]
-                    if _sh_side_rule in ("yes", "no"):
-                        _sh_side = _sh_side_rule
-                        _sh_price = _shadow_market.get(f"{_sh_side}_ask") or 0
-                    else:
-                        _sh_side, _sh_price = client.get_cheaper_side(_shadow_market)
+                if not _sh_rec:
+                    # Fallback to default strategy when no Observatory data
+                    _def_parts = SHADOW_DEFAULT_STRATEGY.split(":")
+                    _sh_rec = {
+                        "strategy_key": SHADOW_DEFAULT_STRATEGY,
+                        "side_rule": _def_parts[0],
+                        "entry_time_rule": _def_parts[1],
+                        "entry_price_max": int(_def_parts[2]),
+                        "sell_target": _def_parts[3],
+                        "setup_key": "shadow:default",
+                    }
+                    blog("INFO", f"Shadow: no strategy found, using default {SHADOW_DEFAULT_STRATEGY}")
+                _sh_side_rule = _sh_rec["side_rule"]
+                if _sh_side_rule in ("yes", "no"):
+                    _sh_side = _sh_side_rule
+                    _sh_price = _shadow_market.get(f"{_sh_side}_ask") or 0
                 else:
                     _sh_side, _sh_price = client.get_cheaper_side(_shadow_market)
 
