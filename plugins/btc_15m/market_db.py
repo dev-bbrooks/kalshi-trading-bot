@@ -2441,3 +2441,19 @@ def get_latest_metric_snapshot() -> tuple[str | None, dict | None]:
     if row:
         return row["recorded_at"], _json.loads(row["metrics"])
     return None, None
+
+
+def get_observation_price_snapshots(ticker: str) -> list:
+    """Get price_snapshots JSON array from btc15m_observations for a given ticker."""
+    import json as _json
+    with get_conn() as c:
+        row = c.execute(
+            "SELECT price_snapshots FROM btc15m_observations WHERE ticker = ? LIMIT 1",
+            (ticker,)
+        ).fetchone()
+    if row and row["price_snapshots"]:
+        try:
+            return _json.loads(row["price_snapshots"])
+        except Exception:
+            return []
+    return []

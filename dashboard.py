@@ -31,7 +31,7 @@ from plugins.btc_15m.market_db import (
     get_shadow_trade_analysis, reconcile_shadow_trades, get_pnl_attribution,
     get_observation_count, get_observatory_summary, get_net_edge_summary,
     get_realized_edge, get_btc_surface_data, get_feature_importance,
-    get_metric_snapshot_near, get_latest_metric_snapshot,
+    get_metric_snapshot_near, get_latest_metric_snapshot, get_observation_price_snapshots,
     get_open_trade, update_trade, get_top_strategies,
     compute_strategy_risk_score,
 )
@@ -850,6 +850,57 @@ def api_trade_detail(trade_id):
     t["strategy_display"] = t.get("auto_strategy_key") or ""
     path = get_price_path(trade_id)
     return jsonify({"trade": t, "price_path": path})
+
+
+@app.route("/api/trade/<int:trade_id>/observation_path")
+@requires_auth
+def api_trade_observation_path(trade_id):
+    """Return observation price snapshots as chart-compatible path for shadow/observed trades."""
+    from datetime import datetime, timedelta, timezone
+    t = get_trade(trade_id)
+    if not t:
+        return jsonify({"path": [], "source": "observation"})
+    ticker = t.get("ticker", "")
+    side = t.get("side", "")
+    is_shadow = t.get("is_shadow", 0)
+    snaps = get_observation_price_snapshots(ticker)
+    if not snaps:
+        return jsonify({"path": [], "source": "observation"})
+    # Compute market close time from ticker for timestamp reconstruction
+    close_time_str = t.get("close_time_utc") or ""
+    if not close_time_str:
+        # Try to get from market table
+        try:
+            with get_conn() as c:
+                mr = c.execute("SELECT close_time_utc FROM btc15m_markets WHERE ticker = ?",
+                               (ticker,)).fetchone()
+                if mr:
+                    close_time_str = mr["close_time_utc"]
+        except Exception:
+            pass
+    close_dt = None
+    if close_time_str:
+        try:
+            close_dt = datetime.fromisoformat(close_time_str.replace("Z", "+00:00"))
+        except Exception:
+            pass
+    market_start = close_dt - timedelta(minutes=15) if close_dt else None
+    path = []
+    for snap in snaps:
+        t_sec = snap.get("t", 0)
+        ya = snap.get("ya", 0)
+        yb = snap.get("yb", 0)
+        na = snap.get("na", 0)
+        nb = snap.get("nb", 0)
+        if is_shadow and side in ("yes", "no"):
+            our_bid = yb if side == "yes" else nb
+            our_ask = ya if side == "yes" else na
+        else:
+            our_bid = min(yb, nb) if yb and nb else (yb or nb or 0)
+            our_ask = min(ya, na) if ya and na else (ya or na or 0)
+        ts = (market_start + timedelta(seconds=t_sec)).isoformat() if market_start else ""
+        path.append({"our_side_bid": our_bid, "our_side_ask": our_ask, "captured_at": ts})
+    return jsonify({"path": path, "source": "observation"})
 
 
 @app.route("/api/trades/csv")
@@ -8949,7 +9000,69 @@ async function showTradeDetail(tradeId) {
         }
       }
     } else if (canvas) {
-      canvas.style.display = 'none';
+      // Fallback: fetch observation price path for shadow/observed trades
+      const _isFallback = o === 'skipped' || o === 'no_fill' || t.is_shadow;
+      if (_isFallback) {
+        try {
+          const obsR = await api(`/api/trade/${tradeId}/observation_path`);
+          const obsPath = (obsR && obsR.path) || [];
+          if (obsPath.length >= 2) {
+            canvas.style.display = '';
+            const ctx = canvas.getContext('2d');
+            const rect = canvas.getBoundingClientRect();
+            if (rect.width > 0) {
+              const dpr = window.devicePixelRatio || 1;
+              canvas.width = rect.width * dpr;
+              canvas.height = 100 * dpr;
+              ctx.scale(dpr, dpr);
+              const W2 = rect.width, H2 = 100;
+              const pad2 = {t:8, b:14, l:4, r:4};
+              const bids2 = obsPath.map(p => p.our_side_bid || 0).filter(b => b > 0);
+              if (bids2.length >= 2) {
+                let yMin2 = Math.min(...bids2) - 3, yMax2 = Math.max(...bids2) + 3;
+                if (yMax2 - yMin2 < 10) { yMin2 -= 5; yMax2 += 5; }
+                if (entry > 0) { yMin2 = Math.min(yMin2, entry - 3); yMax2 = Math.max(yMax2, entry + 3); }
+                const toX2 = (i) => pad2.l + (i / (bids2.length - 1)) * (W2 - pad2.l - pad2.r);
+                const toY2 = (v) => pad2.t + (1 - (v - yMin2) / (yMax2 - yMin2)) * (H2 - pad2.t - pad2.b);
+                function _drawObsChart() {
+                  ctx.clearRect(0, 0, W2, H2);
+                  if (entry > 0) {
+                    ctx.strokeStyle = 'rgba(88,166,255,0.3)'; ctx.setLineDash([4,3]); ctx.lineWidth = 1;
+                    ctx.beginPath(); ctx.moveTo(pad2.l, toY2(entry)); ctx.lineTo(W2-pad2.r, toY2(entry)); ctx.stroke();
+                    ctx.setLineDash([]);
+                  }
+                  const lastB = bids2[bids2.length-1];
+                  const lc2 = entry > 0 ? (lastB >= entry ? '#3fb950' : '#f85149') : 'var(--blue)';
+                  ctx.strokeStyle = lc2; ctx.lineWidth = 1.5; ctx.beginPath();
+                  for (let i = 0; i < bids2.length; i++) {
+                    const x = toX2(i), y = toY2(bids2[i]);
+                    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                  }
+                  ctx.stroke();
+                  if (entry > 0) { ctx.font = '9px monospace'; ctx.fillStyle = 'rgba(88,166,255,0.5)'; ctx.fillText(entry + '¢', W2-pad2.r-25, toY2(entry)-2); }
+                }
+                _drawObsChart();
+                canvas._chartMap = {
+                  data: bids2.map((b, i) => ({x: i, val: b})),
+                  toX: (x) => toX2(x), toY: (v) => toY2(v),
+                  fromX: (cssX) => (cssX - pad2.l) / (W2 - pad2.l - pad2.r) * (bids2.length - 1),
+                  pad: pad2, H: H2, W: W2, redraw: _drawObsChart,
+                  formatLabel: (p) => `${Math.round(p.val)}¢`,
+                };
+              }
+            }
+            // Label below chart
+            const _chartLabel = document.getElementById('tradeDetailChartLabel');
+            if (_chartLabel) _chartLabel.textContent = 'Market price path';
+          } else {
+            canvas.style.display = 'none';
+          }
+        } catch(_obsE) {
+          canvas.style.display = 'none';
+        }
+      } else {
+        canvas.style.display = 'none';
+      }
     }
   } catch(e) { console.error('Trade detail error:', e); showToast('Detail error: ' + e.message, 'red'); }
 }
