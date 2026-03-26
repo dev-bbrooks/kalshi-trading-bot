@@ -239,12 +239,18 @@ class ClaudeCodeSession:
 
         pid, fd = pty.fork()
         if pid == 0:
-            # Child
-            os.chdir("/opt/trading-platform")
+            # Child — drop to claude-worker user for --dangerously-skip-permissions
+            import pwd
+            pw = pwd.getpwnam("claude-worker")
+            os.setgid(pw.pw_gid)
+            os.setuid(pw.pw_uid)
+            os.environ["HOME"] = pw.pw_dir
+            os.environ["USER"] = "claude-worker"
             os.environ["TERM"] = "xterm-256color"
             os.environ["LANG"] = "en_US.UTF-8"
             os.environ.pop("ANTHROPIC_API_KEY", None)
-            os.execvp(claude_path, [claude_path])
+            os.chdir("/opt/trading-platform")
+            os.execvp(claude_path, [claude_path, "--dangerously-skip-permissions"])
         else:
             self.process = pid
             self.master_fd = fd
