@@ -8433,7 +8433,7 @@ function _renderFilterStats(stats) {
       ${stats.wagered > 0 ? '<span>Wagered: $' + stats.wagered.toFixed(2) + '</span>' : ''}
       ${stats.wagered > 0 ? '<span>ROI: <span class="' + roiCls + '">' + stats.roi + '%</span></span>' : ''}
       ${stats.avg_entry > 0 ? '<span>Avg Entry: ' + Math.round(stats.avg_entry) + '\u00a2</span>' : ''}
-      ${stats.skips ? '<span>Observed: ' + stats.skips + '</span>' : ''}
+      ${stats.skips ? '<span style="color:var(--blue)">Observed: ' + stats.skips + '</span>' : ''}
       ${stats.shadows ? '<span style="color:#a371f7">Shadow: ' + stats.shadows + '</span>' : ''}
       ${stats.errors ? '<span style="color:#d29922">Errors: ' + stats.errors + '</span>' : ''}
       ${stats.best > 0 ? '<span>Best: <span class="pos">' + fmtPnl(stats.best) + '</span></span>' : ''}
@@ -8484,7 +8484,7 @@ function _renderActiveTrade() {
     const _nowRegime = (_lmNow.regime_label || '').replace(/_/g, ' ');
     const _drifted = skip.regime_label && _lmNow.regime_label && skip.regime_label !== _lmNow.regime_label;
     const _skipObsN = skip.regime_obs_n || _lmNow.regime_obs_n || 0;
-    const _skipLabel = _isShadowActive ? '<span class="tc-outcome" style="color:#a371f7">SHADOW TRADE</span>' : '<span class="tc-outcome dim">OBSERVING</span>';
+    const _skipLabel = _isShadowActive ? '<span class="tc-outcome" style="color:#a371f7">SHADOW TRADE</span>' : '<span class="tc-outcome" style="color:var(--blue)">OBSERVING</span>';
     const _skipCardCls = _isShadowActive ? 'tc-shadow' : 'tc-skip';
     el.innerHTML = `<div class="trade-card ${_skipCardCls}" style="margin-bottom:10px;border-left-width:3px">
       <div class="tc-header">
@@ -8719,7 +8719,7 @@ if (isReal) {
 return `<div class="trade-card ${cardCls}" onclick="showTradeDetail(${t.id})" style="cursor:pointer">
   <div class="tc-header">
     <div>
-      <span class="tc-outcome ${pnlCls}">${outLabel}</span>
+      <span class="tc-outcome ${o === 'skipped' ? '' : pnlCls}" ${o === 'skipped' ? 'style="color:var(--blue)"' : ''}>${outLabel}</span>
       ${isReal ? riskTag(riskLvl) : ''}
     </div>
     <span class="tc-pnl ${pnlCls}">${fmtPnl(pnl)}</span>
@@ -8764,7 +8764,7 @@ async function showTradeDetail(tradeId) {
     const riskLvl = t.regime_risk_level || 'unknown';
 
     let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <span class="tc-outcome ${pCls}" style="font-size:16px">${o === 'skipped' ? 'OBSERVED' : o === 'error' ? 'ERROR' : o.toUpperCase()}</span>
+      <span class="tc-outcome ${o === 'skipped' ? '' : pCls}" style="font-size:16px;${o === 'skipped' ? 'color:var(--blue)' : ''}">${o === 'skipped' ? 'OBSERVED' : o === 'error' ? 'ERROR' : o.toUpperCase()}</span>
       <span class="tc-pnl ${pCls}" style="font-size:18px">${fmtPnl(pnl)}</span>
     </div>`;
 
