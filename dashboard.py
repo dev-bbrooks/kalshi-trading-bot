@@ -4435,7 +4435,7 @@ MAIN_HTML = r"""<!DOCTYPE html>
                 padding: 10px; margin-bottom: 8px; border-left: 3px solid var(--border); }
   .trade-card.tc-win { border-left-color: var(--green); }
   .trade-card.tc-loss { border-left-color: var(--red); }
-  .trade-card.tc-skip { border-left-color: var(--dim); }
+  .trade-card.tc-skip { border-left-color: var(--blue); }
   .trade-card.tc-open { border-left-color: var(--blue); }
   .trade-card.tc-shadow { border-left-color: #a371f7; }
   .trade-card.tc-error { border-left-color: #d29922; }
@@ -4453,7 +4453,7 @@ MAIN_HTML = r"""<!DOCTYPE html>
   .tc-tag.ignored { background: #3a2a1a; color: var(--orange); }
   .tc-tag.tag-win { background: #1a2a1a; color: var(--green); }
   .tc-tag.tag-loss { background: #2a1a1a; color: var(--red); }
-  .tc-tag.tag-skip { background: #1a1a2a; color: var(--dim); }
+  .tc-tag.tag-skip { background: rgba(88,166,255,0.1); color: var(--blue); }
   .tc-tag.tag-incomplete { background: rgba(248,81,73,0.15); color: var(--red); }
   .tc-tag.tag-yes { background: #1a2a1a; color: var(--green); }
   .tc-tag.tag-no { background: #2a1a1a; color: var(--red); }
@@ -7382,25 +7382,27 @@ function renderUI(s) {
     } else if (!isRunning) {
       if (tradingMode === 'observe' || tradingMode === 'shadow' || tradingMode === 'hybrid') {
         statusMain = _modeLabels[tradingMode] || 'Idle';
-        dotClass = _modeDots[tradingMode] || 'dot-yellow';
+        dotClass = _modeDots[tradingMode] || 'dot-blue';
         statusColor = _modeColors[tradingMode] || 'var(--dim)';
       } else {
         statusMain = 'Stopped';
         dotClass = 'dot-red';
         statusColor = 'var(--dim)';
       }
-    } else if (hasActiveTrade) {
-      statusMain = 'Trading';
-      dotClass = 'dot-green';
-      statusColor = 'var(--green)';
-    } else if (hasPendingTrade) {
-      statusMain = 'Buying';
-      dotClass = 'dot-yellow';
-      statusColor = 'var(--yellow)';
     } else {
       statusMain = _modeLabels[tradingMode] || 'Running';
-      dotClass = _modeDots[tradingMode] || 'dot-yellow';
-      statusColor = _modeColors[tradingMode] || 'var(--yellow)';
+      dotClass = _modeDots[tradingMode] || 'dot-blue';
+      statusColor = _modeColors[tradingMode] || 'var(--blue)';
+      // Append countdown if a market is active
+      var _closeT = (s.active_trade && s.active_trade.close_time) || (s.live_market && s.live_market.close_time);
+      if (_closeT) {
+        var _ctMs = new Date(_closeT.replace('Z','+00:00')).getTime() - Date.now();
+        if (_ctMs > 0) {
+          var _ctM = Math.floor(_ctMs / 60000);
+          var _ctS = Math.floor((_ctMs % 60000) / 1000);
+          statusMain += ' \u00b7 ' + _ctM + ':' + (_ctS < 10 ? '0' : '') + _ctS;
+        }
+      }
     }
 
     // Render
@@ -7848,12 +7850,7 @@ function renderUI(s) {
         var hasShadow = _shadowUpdate(lm, s);
         if (hasShadow) {
           _simHide();
-          // Fix 1: Override "Observing" header status when shadow trade is visible
           mc.style.borderLeftColor = '#a371f7';
-          $('#statusDot').className = 'status-dot dot-purple';
-          var _stEl = $('#statusText');
-          _stEl.textContent = 'Shadow Trade';
-          _stEl.style.color = '#a371f7';
         } else {
           _shadowHide();
           _simUpdate(lm);
@@ -8471,7 +8468,9 @@ function _renderActiveTrade() {
       </div>${at.auto_strategy ? `<div style="margin-top:3px;font-size:10px;color:var(--blue)">${at.auto_strategy} · EV ${(at.auto_strategy_ev||0)>=0?'+':''}${(at.auto_strategy_ev||0).toFixed(1)}¢ · ${at.auto_strategy_setup||''}</div>` : ''}
     </div>`;
   } else if (skip && skip.ticker) {
-    const key = 'skip|' + skip.ticker + '|' + skip.reason + '|' + ((state.live_market||{}).regime_label||'');
+    const _aShd = state.active_shadow;
+    const _isShadowActive = _aShd && (_aShd.ticker === skip.ticker || _aShd.status === 'pending_fill');
+    const key = 'skip|' + skip.ticker + '|' + skip.reason + '|' + ((state.live_market||{}).regime_label||'') + '|' + (_isShadowActive ? 'shd' : '');
     if (key === _lastActiveTradeKey) return;
     _lastActiveTradeKey = key;
     el.style.display = '';
@@ -8482,9 +8481,11 @@ function _renderActiveTrade() {
     const _nowRegime = (_lmNow.regime_label || '').replace(/_/g, ' ');
     const _drifted = skip.regime_label && _lmNow.regime_label && skip.regime_label !== _lmNow.regime_label;
     const _skipObsN = skip.regime_obs_n || _lmNow.regime_obs_n || 0;
-    el.innerHTML = `<div class="trade-card tc-skip" style="margin-bottom:10px;border-left-width:3px">
+    const _skipLabel = _isShadowActive ? '<span class="tc-outcome" style="color:#a371f7">SHADOW TRADE</span>' : '<span class="tc-outcome dim">OBSERVING</span>';
+    const _skipCardCls = _isShadowActive ? 'tc-shadow' : 'tc-skip';
+    el.innerHTML = `<div class="trade-card ${_skipCardCls}" style="margin-bottom:10px;border-left-width:3px">
       <div class="tc-header">
-        <div><span class="tc-outcome dim">OBSERVING</span></div>
+        <div>${_skipLabel}</div>
       </div>
       <div style="margin-top:4px;font-size:12px;color:var(--dim)">${regime}${_skipObsN > 0 ? ` <span style="font-size:10px">n=${_skipObsN}</span>` : ''}</div>
       ${_drifted ? `<div style="margin-top:2px;font-size:10px;color:#d29922">now ${_nowRegime}</div>` : ''}
