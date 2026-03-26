@@ -89,6 +89,7 @@ def terminal_page():
 def health():
     return jsonify({"status": "ok"})
 
+
 # ── WebSocket handlers ────────────────────────────────────────
 
 @socketio.on("connect", namespace="/terminal/ws")
@@ -138,11 +139,11 @@ def ws_resize(data):
     fd = _active_session["fd"]
     if fd is not None and request.sid == _active_session["sid"]:
         try:
-            rows = int(data.get("rows", 24))
-            cols = int(data.get("cols", 80))
+            rows = int(data.get("rows") or 24)
+            cols = int(data.get("cols") or 80)
             winsize = struct.pack("HHHH", rows, cols, 0, 0)
             fcntl.ioctl(fd, termios.TIOCSWINSZ, winsize)
-        except (OSError, ValueError):
+        except (OSError, ValueError, TypeError):
             pass
 
 @socketio.on("disconnect", namespace="/terminal/ws")
@@ -216,6 +217,7 @@ class ClaudeCodeSession:
         self.alive = True
         self.busy = False
         self.prompt_count = 0
+        self.needs_restart = False
 
     def send_prompt(self, text):
         if self.busy:
@@ -308,6 +310,11 @@ class ClaudeCodeSession:
                         elif block.get("type") == "tool_use":
                             name = block.get("name", "")
                             inp = block.get("input", {})
+                            # Detect terminal restart commands
+                            if name == "Bash":
+                                cmd_str = str(inp.get("command", ""))
+                                if "restart platform-terminal" in cmd_str or "restart platform_terminal" in cmd_str:
+                                    self.needs_restart = True
                             if name == "Read":
                                 activity = f"Reading {inp.get('file_path', '...')}"
                             elif name == "Write":
@@ -353,6 +360,29 @@ class ClaudeCodeSession:
                           {"text": "Claude exited with error",
                            "detail": stderr_out[:500]},
                           namespace="/terminal/ws", to=self.sid)
+
+        # Check response text for restart indicators
+        restart_phrases = [
+            "restart platform-terminal",
+            "restart the terminal",
+            "supervisorctl restart platform-terminal",
+            "need to restart the terminal",
+        ]
+        response_lower = response.lower()
+        for phrase in restart_phrases:
+            if phrase in response_lower:
+                self.needs_restart = True
+                break
+
+        # If restart needed, emit event and trigger delayed restart
+        if self.needs_restart:
+            self.needs_restart = False
+            self.sio.emit("claude_status",
+                          {"text": "Restarting terminal service...", "type": "restart"},
+                          namespace="/terminal/ws", to=self.sid)
+            eventlet.sleep(2)  # Let the client render the response first
+            import subprocess as sp
+            sp.Popen(["supervisorctl", "restart", "platform-terminal"])
 
         self.busy = False
         self.process = None
@@ -422,43 +452,56 @@ TERMINAL_HTML = r"""<!DOCTYPE html>
 <title>Terminal — Trading Platform</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css">
 <style>
+  :root {
+    --bg: #0d1117;
+    --card: #161b22;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --green: #3fb950;
+    --red: #f85149;
+    --yellow: #d29922;
+    --blue: #58a6ff;
+    --dim: #8b949e;
+    --orange: #f0883e;
+  }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { height: 100%; overflow: hidden; background: #0a0a0a; color: #e0e0e0;
-    font-family: system-ui, -apple-system, sans-serif; }
+  html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
 
   #app { width: 100%; height: 100dvh; display: flex; flex-direction: column; }
 
   /* ── Header ── */
   #header {
-    height: 44px; padding: 0 12px; background: #111; border-bottom: 1px solid #333;
+    height: 48px; padding: 0 14px; background: var(--card); border-bottom: 1px solid var(--border);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
     display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
   }
-  #header .title { font-size: 14px; font-weight: 600; color: #e0e0e0; }
-  #header .status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #888; }
+  #header .title { font-size: 15px; font-weight: 600; color: var(--text); }
+  #header .status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--dim); }
   #header .status .dot {
     width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
   }
-  .dot-ready { background: #22c55e; }
-  .dot-busy { background: #f59e0b; animation: pulse 1s infinite; }
-  .dot-dead, .dot-disconnected { background: #ef4444; }
-  .dot-none { background: #555; }
+  .dot-ready { background: var(--green); }
+  .dot-busy { background: var(--yellow); animation: pulse 1s infinite; }
+  .dot-dead, .dot-disconnected { background: var(--red); }
+  .dot-none { background: var(--dim); }
   @keyframes pulse { 50% { opacity: 0.4; } }
   #new-session-btn {
-    background: none; border: 1px solid #444; color: #888; font-size: 12px;
-    padding: 4px 10px; border-radius: 6px; cursor: pointer;
+    background: none; border: 1px solid var(--border); color: var(--dim); font-size: 12px;
+    padding: 5px 12px; border-radius: 6px; cursor: pointer; font-family: inherit;
   }
-  #new-session-btn:active { background: #222; }
+  #new-session-btn:active { background: var(--bg); }
 
   /* ── Tab bar ── */
   #tabs {
-    display: flex; background: #111; border-bottom: 1px solid #333; flex-shrink: 0;
+    display: flex; background: var(--card); border-bottom: 1px solid var(--border); flex-shrink: 0;
   }
   .tab {
     flex: 1; padding: 10px 0; text-align: center; font-size: 13px; font-weight: 500;
-    color: #666; cursor: pointer; border-bottom: 2px solid transparent;
+    color: var(--dim); cursor: pointer; border-bottom: 2px solid transparent;
     transition: color 0.15s, border-color 0.15s; -webkit-tap-highlight-color: transparent;
   }
-  .tab.active { color: #4a9eff; border-bottom-color: #4a9eff; }
+  .tab.active { color: var(--blue); border-bottom-color: var(--blue); }
 
   /* ── Panels ── */
   #panels { flex: 1; min-height: 0; position: relative; }
@@ -466,7 +509,7 @@ TERMINAL_HTML = r"""<!DOCTYPE html>
   .panel.active { display: flex; }
 
   /* ── Claude panel ── */
-  #claude-panel { background: #0a0a0a; }
+  #claude-panel { background: var(--bg); }
   #conversation {
     flex: 1; overflow-y: auto; padding: 12px; overscroll-behavior: none;
     display: flex; flex-direction: column; gap: 12px;
@@ -474,127 +517,131 @@ TERMINAL_HTML = r"""<!DOCTYPE html>
   .msg { max-width: 88%; padding: 10px 14px; border-radius: 16px; font-size: 15px;
     line-height: 1.5; word-wrap: break-word; position: relative; }
   .msg-user {
-    align-self: flex-end; background: #1a1a2e; border-bottom-right-radius: 4px;
+    align-self: flex-end; background: rgba(88, 166, 255, 0.08);
+    border: 1px solid rgba(88, 166, 255, 0.15); border-bottom-right-radius: 4px;
     white-space: pre-wrap;
   }
   .msg-assistant {
-    align-self: flex-start; background: #1a1a1a; border-bottom-left-radius: 4px;
+    align-self: flex-start; background: var(--card); border: 1px solid var(--border);
+    border-bottom-left-radius: 4px;
   }
   .msg-assistant pre {
-    background: #0d0d0d; border: 1px solid #333; border-radius: 8px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
     padding: 10px; margin: 8px 0; overflow-x: auto; font-size: 13px;
     font-family: 'SF Mono', Menlo, Monaco, monospace; white-space: pre-wrap;
     word-wrap: break-word;
   }
   .msg-assistant code {
     font-family: 'SF Mono', Menlo, Monaco, monospace; font-size: 13px;
-    background: #1e1e1e; padding: 1px 5px; border-radius: 4px;
+    background: var(--bg); padding: 1px 5px; border-radius: 4px;
   }
   .msg-assistant pre code { background: none; padding: 0; }
   .msg-assistant strong { color: #f0f0f0; }
   .copy-btn {
     position: absolute; top: 6px; right: 6px; background: rgba(255,255,255,0.08);
-    border: none; color: #888; font-size: 11px; padding: 3px 8px; border-radius: 6px;
+    border: none; color: var(--dim); font-size: 11px; padding: 3px 8px; border-radius: 6px;
     cursor: pointer; opacity: 0; transition: opacity 0.15s;
+    display: flex; align-items: center; justify-content: center;
   }
   .msg-assistant:hover .copy-btn, .msg-assistant:active .copy-btn { opacity: 1; }
-  .copy-btn.copied { color: #22c55e; }
+  .copy-btn.copied { color: var(--green); }
 
   /* ── Activity card ── */
   .activity-card {
-    align-self: flex-start; max-width: 88%; padding: 8px 14px; border-radius: 12px;
-    background: #1a1a1a; border: 1px solid #2a2a2a; font-size: 13px; color: #aaa;
+    align-self: flex-start; max-width: 88%; padding: 8px 14px; border-radius: 8px;
+    background: var(--card); border: 1px solid var(--border); font-size: 13px; color: var(--dim);
     display: flex; align-items: center; gap: 8px;
   }
   .activity-card .spinner {
-    width: 8px; height: 8px; border-radius: 50%; background: #f59e0b;
+    width: 8px; height: 8px; border-radius: 50%; background: var(--yellow);
     animation: pulse 1s infinite; flex-shrink: 0;
   }
   .activity-collapsed {
-    font-size: 12px; color: #555; cursor: pointer; align-self: flex-start;
+    font-size: 12px; color: var(--dim); cursor: pointer; align-self: flex-start;
     padding: 2px 0; margin-top: -8px;
   }
-  .activity-collapsed:hover { color: #888; }
+  .activity-collapsed:hover { color: var(--text); }
   .activity-log {
     display: none; align-self: flex-start; max-width: 88%; padding: 8px 12px;
-    background: #111; border-radius: 8px; font-size: 12px; color: #777;
+    background: var(--card); border-radius: 8px; font-size: 12px; color: var(--dim);
     font-family: monospace; white-space: pre-wrap; margin-top: -8px;
   }
 
   /* ── Error / restart ── */
   .msg-error {
-    align-self: center; background: #2a1515; border: 1px solid #4a2020;
-    color: #ef4444; border-radius: 8px; padding: 10px 16px; font-size: 13px;
+    align-self: center; background: rgba(248, 81, 73, 0.08);
+    border: 1px solid rgba(248, 81, 73, 0.3);
+    color: var(--red); border-radius: 8px; padding: 10px 16px; font-size: 13px;
     text-align: center;
   }
   .msg-error button {
-    background: #ef4444; color: #fff; border: none; padding: 6px 14px;
+    background: var(--red); color: #fff; border: none; padding: 6px 14px;
     border-radius: 6px; margin-top: 8px; cursor: pointer; font-size: 13px;
+    font-family: inherit;
   }
 
   /* ── Session divider ── */
   .session-divider {
-    text-align: center; color: #444; font-size: 11px; padding: 8px 0;
-    border-top: 1px solid #222; margin-top: 4px;
+    text-align: center; color: var(--dim); font-size: 11px; padding: 8px 0;
+    border-top: 1px solid var(--border); margin-top: 4px;
   }
 
   /* ── Input area ── */
   #input-area {
     padding: 8px 12px; padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
-    background: #111; border-top: 1px solid #333; display: flex; gap: 8px;
+    background: var(--card); border-top: 1px solid var(--border); display: flex; gap: 8px;
     align-items: flex-end; flex-shrink: 0;
   }
   #claude-paste-btn {
-    width: 44px; height: 44px; border-radius: 10px; border: none;
-    background: #1a1a1a; color: #888; font-size: 20px; cursor: pointer;
+    width: 44px; height: 44px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--dim); cursor: pointer;
     flex-shrink: 0; display: flex; align-items: center; justify-content: center;
   }
-  #claude-paste-btn:active { background: #2a2a2a; }
+  #claude-paste-btn:active { background: var(--card); }
   #prompt-input {
-    flex: 1; background: #1a1a1a; border: 1px solid #333; border-radius: 12px;
-    color: #e0e0e0; font-size: 16px; padding: 10px 14px; resize: none;
-    font-family: system-ui, -apple-system, sans-serif; line-height: 1.4;
+    flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text); font-size: 16px; padding: 10px 14px; resize: none;
+    font-family: inherit; line-height: 1.4;
     min-height: 44px; max-height: 45vh; overflow-y: auto;
   }
-  #prompt-input::placeholder { color: #555; }
-  #prompt-input:focus { outline: none; border-color: #4a9eff; }
+  #prompt-input::placeholder { color: var(--dim); }
+  #prompt-input:focus { outline: none; border-color: var(--blue); }
   #send-btn {
-    width: 44px; height: 44px; border-radius: 10px; border: none;
-    background: #4a9eff; color: #fff; font-size: 20px; cursor: pointer;
+    width: 44px; height: 44px; border-radius: 8px; border: none;
+    background: var(--blue); color: #fff; cursor: pointer;
     flex-shrink: 0; display: flex; align-items: center; justify-content: center;
     transition: background 0.15s;
   }
-  #send-btn:disabled { background: #333; color: #666; cursor: default; }
-  #send-btn.stop-btn { background: #ef4444; }
+  #send-btn:disabled { background: var(--border); color: var(--dim); cursor: default; }
+  #send-btn.stop-btn { background: var(--red); }
 
   /* ── Shell panel ── */
-  #shell-panel { background: #0a0a0a; }
+  #shell-panel { background: var(--bg); }
   #shell-wrap { flex: 1; min-height: 0; position: relative; }
   .xterm { height: 100%; }
   #shell-paste-btn {
     position: absolute; bottom: 16px; right: 16px; z-index: 10;
-    width: 40px; height: 40px; border-radius: 50%; border: none;
-    background: rgba(255,255,255,0.1); color: #c9d1d9; font-size: 18px;
-    cursor: pointer; display: flex; align-items: center; justify-content: center;
-    backdrop-filter: blur(4px); transition: background 0.2s;
+    width: 44px; height: 44px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--dim); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
   }
-  #shell-paste-btn:hover { background: rgba(255,255,255,0.2); }
+  #shell-paste-btn:hover { background: var(--card); }
 
   /* ── Log panel ── */
-  #log-panel { background: #0a0a0a; }
+  #log-panel { background: var(--bg); }
   #log-header {
     padding: 8px 12px; display: flex; justify-content: space-between; align-items: center;
-    border-bottom: 1px solid #222; flex-shrink: 0;
+    border-bottom: 1px solid var(--border); flex-shrink: 0;
   }
-  #log-header span { font-size: 12px; color: #666; }
+  #log-header span { font-size: 12px; color: var(--dim); }
   #log-clear-btn {
-    background: none; border: 1px solid #333; color: #666; font-size: 11px;
+    background: none; border: 1px solid var(--border); color: var(--dim); font-size: 11px;
     padding: 3px 10px; border-radius: 4px; cursor: pointer;
   }
   #log-content {
     flex: 1; overflow-y: auto; padding: 8px 12px; font-family: 'SF Mono', Menlo, Monaco, monospace;
-    font-size: 12px; color: #888; white-space: pre-wrap; word-wrap: break-word;
-    overscroll-behavior: none;
+    font-size: 12px; color: var(--dim); white-space: pre-wrap; word-wrap: break-word;
+    overscroll-behavior: none; background: var(--bg);
   }
 </style>
 </head>
@@ -602,11 +649,12 @@ TERMINAL_HTML = r"""<!DOCTYPE html>
 <div id="app">
   <!-- Header -->
   <div id="header">
-    <span class="title">Claude Code</span>
+    <span style="display:flex;align-items:center;"><a href="/" style="color: var(--dim); text-decoration: none; font-size: 12px; margin-right: 8px;">&larr; Dashboard</a><span class="title">Claude Code</span></span>
     <span class="status">
       <span id="claude-dot" class="dot dot-none"></span>
       <span id="claude-status-text">Idle</span>
     </span>
+
     <button id="new-session-btn">New Session</button>
   </div>
 
@@ -623,16 +671,16 @@ TERMINAL_HTML = r"""<!DOCTYPE html>
     <div id="claude-panel" class="panel active">
       <div id="conversation"></div>
       <div id="input-area">
-        <button id="claude-paste-btn" title="Paste">&#x1F4CB;</button>
+        <button id="claude-paste-btn" title="Paste"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M12 11v6"/><path d="M9 14l3 3 3-3"/></svg></button>
         <textarea id="prompt-input" rows="1" placeholder="Send a prompt to Claude Code..."></textarea>
-        <button id="send-btn" title="Send">&#x2191;</button>
+        <button id="send-btn" title="Send"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></button>
       </div>
     </div>
 
     <!-- Shell panel -->
     <div id="shell-panel" class="panel">
       <div id="shell-wrap">
-        <button id="shell-paste-btn" title="Paste from clipboard">&#x1F4CB;</button>
+        <button id="shell-paste-btn" title="Paste from clipboard"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M12 11v6"/><path d="M9 14l3 3 3-3"/></svg></button>
       </div>
     </div>
 
@@ -680,6 +728,7 @@ TERMINAL_HTML = r"""<!DOCTYPE html>
     reconnectionDelay: 1000,
     reconnectionDelayMax: 5000
   });
+  var pendingRestart = false;
 
   // ═══════════════════════════════════════════════════
   //  SHELL MODE (lazy init)
@@ -696,9 +745,9 @@ TERMINAL_HTML = r"""<!DOCTYPE html>
       cursorBlink: true, fontSize: 16,
       fontFamily: '"SF Mono", Menlo, Monaco, "Courier New", monospace',
       theme: {
-        background: '#0a0a0a', foreground: '#c9d1d9', cursor: '#58a6ff',
+        background: '#0d1117', foreground: '#c9d1d9', cursor: '#58a6ff',
         selectionBackground: '#264f78',
-        black: '#0d1117', red: '#ff7b72', green: '#7ee787', yellow: '#d29922',
+        black: '#0d1117', red: '#f85149', green: '#3fb950', yellow: '#d29922',
         blue: '#58a6ff', magenta: '#bc8cff', cyan: '#39c5cf', white: '#c9d1d9',
         brightBlack: '#484f58', brightRed: '#ffa198', brightGreen: '#56d364',
         brightYellow: '#e3b341', brightBlue: '#79c0ff', brightMagenta: '#d2a8ff',
@@ -727,6 +776,11 @@ TERMINAL_HTML = r"""<!DOCTYPE html>
 
   // Shell socket events
   socket.on('connect', function() {
+    if (pendingRestart) {
+      pendingRestart = false;
+      setTimeout(function() { window.location.reload(); }, 500);
+      return;
+    }
     if (shellInitialized) {
       // Re-spawn shell on reconnect
       socket.emit('shell_start');
@@ -806,11 +860,11 @@ TERMINAL_HTML = r"""<!DOCTYPE html>
 
   function updateSendBtn() {
     if (claudeState === 'busy') {
-      sendBtn.textContent = '\u25A0'; // stop square
+      sendBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>';
       sendBtn.classList.add('stop-btn');
       sendBtn.disabled = false;
     } else {
-      sendBtn.textContent = '\u2191'; // up arrow
+      sendBtn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>';
       sendBtn.classList.remove('stop-btn');
       sendBtn.disabled = !promptInput.value.trim();
     }
@@ -840,12 +894,12 @@ TERMINAL_HTML = r"""<!DOCTYPE html>
     // Copy button
     var btn = document.createElement('button');
     btn.className = 'copy-btn';
-    btn.textContent = 'Copy';
+    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
     btn.addEventListener('click', function() {
       navigator.clipboard.writeText(rawText || text).then(function() {
-        btn.textContent = 'Copied!';
+        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>';
         btn.classList.add('copied');
-        setTimeout(function() { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);
+        setTimeout(function() { btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>'; btn.classList.remove('copied'); }, 1500);
       }).catch(function(){});
     });
     el.appendChild(btn);
@@ -893,14 +947,14 @@ TERMINAL_HTML = r"""<!DOCTYPE html>
     if (activityLog.length > 0) {
       var toggle = document.createElement('div');
       toggle.className = 'activity-collapsed';
-      toggle.textContent = '\u25B6 View activity (' + activityLog.length + ' steps)';
+      toggle.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:4px;"><polyline points="9 18 15 12 9 6"/></svg>View activity (' + activityLog.length + ' steps)';
       var logEl = document.createElement('div');
       logEl.className = 'activity-log';
       logEl.textContent = activityLog.join('\n');
       toggle.addEventListener('click', function() {
         var open = logEl.style.display === 'block';
         logEl.style.display = open ? 'none' : 'block';
-        toggle.textContent = (open ? '\u25B6' : '\u25BC') + ' View activity (' + activityLog.length + ' steps)';
+        toggle.innerHTML = (open ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:4px;"><polyline points="9 18 15 12 9 6"/></svg>' : '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:4px;"><polyline points="6 9 12 15 18 9"/></svg>') + 'View activity (' + activityLog.length + ' steps)';
       });
       conv.appendChild(toggle);
       conv.appendChild(logEl);
@@ -985,6 +1039,7 @@ TERMINAL_HTML = r"""<!DOCTYPE html>
     addSessionDivider();
   });
 
+
   // Claude paste button
   document.getElementById('claude-paste-btn').addEventListener('click', function() {
     if (navigator.clipboard && navigator.clipboard.readText) {
@@ -1015,6 +1070,14 @@ TERMINAL_HTML = r"""<!DOCTYPE html>
   });
 
   socket.on('claude_status', function(d) {
+    if (d.type === 'restart') {
+      pendingRestart = true;
+      var el = document.createElement('div');
+      el.style.cssText = 'text-align:center;color:var(--yellow);font-size:12px;padding:8px 0;';
+      el.textContent = 'Restarting terminal service...';
+      conv.appendChild(el);
+      scrollToBottom();
+    }
     updateActivityCard(d.text);
   });
 
