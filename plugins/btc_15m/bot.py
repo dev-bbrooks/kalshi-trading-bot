@@ -1719,6 +1719,7 @@ def _run_one_market(client: KalshiClient, cfg: dict) -> bool:
         })
 
         # Shadow trading in shadow/hybrid mode
+        _shadow_id = None
         if _trading_mode in ("shadow", "hybrid"):
             try:
                 _shadow_market = client.get_market(ticker)
@@ -1782,6 +1783,43 @@ def _run_one_market(client: KalshiClient, cfg: dict) -> bool:
             track_side=True, resolve_inline=True,
             initial_cheaper_side=initial_skip_side, market_id=market_id,
         )
+
+        # Resolve shadow trade outcome after market closes
+        if _shadow_id:
+            try:
+                _sh_trade = get_trade(_shadow_id)
+                if _sh_trade and _sh_trade.get("outcome") == "open" and _sh_trade.get("shares_filled", 0) > 0:
+                    _sh_result = None
+                    for _ in range(8):
+                        _sh_result = client.get_market_result(ticker)
+                        if _sh_result:
+                            break
+                        time.sleep(2)
+                    if _sh_result:
+                        _sh_side = _sh_trade["side"]
+                        _sh_won = (_sh_result == _sh_side)
+                        _sh_cost = _sh_trade.get("actual_cost", 0)
+                        _sh_gross = client.calc_gross(
+                            _sh_trade.get("shares_filled", 0), 0, 0, _sh_won)
+                        _sh_pnl = _sh_gross - _sh_cost
+                        _sh_outcome = "win" if _sh_gross > _sh_cost else "loss"
+                        update_trade(_shadow_id, {
+                            "outcome": _sh_outcome,
+                            "gross_proceeds": round(_sh_gross, 2),
+                            "pnl": round(_sh_pnl, 2),
+                            "exit_time_utc": now_utc(),
+                            "market_result": _sh_result,
+                            "exit_method": "market_expiry",
+                        })
+                        blog("INFO", f"Shadow resolved: {_sh_outcome.upper()} "
+                                      f"{fpnl(_sh_pnl)} [{ticker}]")
+                    else:
+                        blog("DEBUG", f"Shadow {_shadow_id}: no market result yet — backfill will catch it")
+                elif _sh_trade and _sh_trade.get("shares_filled", 0) == 0:
+                    update_trade(_shadow_id, {"outcome": "no_fill", "exit_time_utc": now_utc()})
+                    blog("DEBUG", f"Shadow {_shadow_id}: no fills — marked no_fill")
+            except Exception as _sre:
+                blog("DEBUG", f"Shadow resolve error: {_sre}")
 
         _update_state({"active_shadow": None, "active_skip": None})
         return False

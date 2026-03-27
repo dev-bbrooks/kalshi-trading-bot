@@ -21,7 +21,8 @@ Plugin-specific code is under `plugins/btc_15m/`.
 - `kalshi.py` (401) — pure API client, RSA-PSS auth, dollar/FP normalization
 - `push.py` (125) — VAPID push infrastructure only (no notify_* functions)
 - `regime.py` (887) — asset-parameterized regime engine
-- `dashboard.py` (13,601) — Flask dashboard, surgical port of legacy
+- `dashboard.py` (13,601) — Flask dashboard, surgical port of legacy. Owns terminal UI (Dev tab).
+- `terminal.py` (777) — backend-only Flask+SocketIO service (port 8051). WebSocket handlers, REST API, PTY, Claude Code sessions. No HTML — dashboard.py serves the UI.
 
 ### Plugin layer (plugins/btc_15m/)
 - `plugin.py` (160) — Btc15mPlugin subclass, owns default config
@@ -94,7 +95,7 @@ Fresh deployment — data collection restart. No legacy data. Bot records all ma
   Be specific and technical — include function names, variable names, and data flow. These summaries are pasted into a separate planning session to maintain continuity.
 
 ## Terminal Service (platform-terminal)
-- The web terminal at /terminal is a separate Flask app: terminal.py (port 8051, supervisor: platform-terminal)
+- terminal.py is a backend-only Flask+SocketIO service (port 8051, supervisor: platform-terminal). No HTML — dashboard.py owns the terminal UI (Dev tab).
 - When editing terminal.py, always run `python3 -m py_compile /opt/trading-platform/terminal.py` before restarting
 - Auto-restart detection covers all three services: platform-terminal, platform-dashboard, and plugin-btc-15m
 - When your response mentions restarting any of these services, the terminal executes the restart automatically after delivering the response. Do NOT attempt to run supervisorctl yourself (claude-worker doesn't have permission). Just mention it needs to happen.
