@@ -160,6 +160,11 @@ def api_model():
             s = _claude_session.get("session")
             if s and not s.busy:
                 s.claude_session_id = None
+                # Clear from DB too so reconnect doesn't reload it
+                if s.db_session_id:
+                    with get_conn() as c:
+                        c.execute("UPDATE terminal_sessions SET claude_session_id = NULL WHERE id = ?",
+                                  (s.db_session_id,))
                 s.db_session_id = None
         return jsonify({"model": _claude_model["model"]})
     return jsonify({"model": _claude_model["model"]})
