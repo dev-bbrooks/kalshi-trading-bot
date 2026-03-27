@@ -12926,7 +12926,9 @@ function _termInit() {
   // New session
   document.getElementById('term-new-session-btn').addEventListener('click', async function() {
     if (_tState === 'busy' || _tState === 'ready') _ts.emit('claude_stop');
-    try { var r = await fetch('/terminal/api/session/new', {method: 'POST'}); var d = await r.json(); _tDbSid = d.session.id; _tCsSid = null; } catch(e) {}
+    _tCsSid = null;
+    _tBackendAlive = false;
+    try { var r = await fetch('/terminal/api/session/new', {method: 'POST'}); if (r.ok) { var d = await r.json(); if (d.session) _tDbSid = d.session.id; } else { console.error('New session API returned', r.status); } } catch(e) {}
     _tSetState('none');
     var el = document.createElement('div'); el.className = 'session-divider'; el.textContent = '— New Session —'; _tconv.appendChild(el); _tScrollBot();
   });

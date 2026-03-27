@@ -225,6 +225,7 @@ def api_session_current():
 @app.route("/terminal/api/session/new", methods=["POST"])
 def api_session_new():
     if not _is_authenticated():
+        print(f"[terminal] api_session_new: 401 unauthorized (cookie present: {bool(request.cookies.get('platform_auth'))})", flush=True)
         return jsonify({"error": "unauthorized"}), 401
     with get_conn() as c:
         # End all active sessions
@@ -404,6 +405,8 @@ class ClaudeCodeSession:
         if _claude_model["model"]:
             cmd.extend(["--model", _claude_model["model"]])
 
+        will_resume = bool(self.claude_session_id)
+        print(f"[debug] send_prompt: claude_session_id={self.claude_session_id!r} (type={type(self.claude_session_id).__name__}), will_resume={will_resume}, db_session_id={self.db_session_id}", flush=True)
         if self.claude_session_id:
             cmd.extend(["--resume", self.claude_session_id])
 
@@ -747,8 +750,9 @@ def ws_claude_start(data=None):
     claude_session_id = None
     db_session_id = None
     if isinstance(data, dict):
-        claude_session_id = data.get("claude_session_id")
+        claude_session_id = data.get("claude_session_id") or None  # coerce falsy to None
         db_session_id = data.get("db_session_id")
+    print(f"[debug] ws_claude_start: claude_session_id={claude_session_id!r}, db_session_id={db_session_id!r}", flush=True)
     session = ClaudeCodeSession(socketio, request.sid,
                                 claude_session_id=claude_session_id,
                                 db_session_id=db_session_id)
@@ -1567,11 +1571,17 @@ TERMINAL_HTML = r"""<!DOCTYPE html>
     if (claudeState === 'busy' || claudeState === 'ready') {
       socket.emit('claude_stop');
     }
+    // Clear session ID unconditionally — must happen even if API fails
+    currentClaudeSessionId = null;
+    backendSessionAlive = false;
     try {
       var r = await fetch('/terminal/api/session/new', {method: 'POST'});
-      var data = await r.json();
-      currentDbSessionId = data.session.id;
-      currentClaudeSessionId = null;
+      if (r.ok) {
+        var data = await r.json();
+        if (data.session) currentDbSessionId = data.session.id;
+      } else {
+        console.error('New session API returned', r.status);
+      }
     } catch(e) {
       console.error('Failed to create new session:', e);
     }
