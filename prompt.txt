@@ -1,0 +1,382 @@
+Visual overhaul of terminal.py's HTML/CSS to match the main dashboard app at dash.btcbotapp.com. Read terminal.py first. This is CSS/HTML only — do NOT touch any Python backend code or JavaScript logic.
+
+## The Problem
+
+The terminal uses hardcoded colors and a different design language than the dashboard. They need to feel like the same app. Here's exactly what to change:
+
+## 1. CSS Variables
+
+Replace all hardcoded colors with the dashboard's CSS variable system. Add this to the top of the <style> block:
+
+```css
+:root {
+    --bg: #0d1117;
+    --card: #161b22;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --green: #3fb950;
+    --red: #f85149;
+    --yellow: #d29922;
+    --blue: #58a6ff;
+    --dim: #8b949e;
+    --orange: #f0883e;
+}
+```
+
+Then replace every hardcoded color:
+- #0a0a0a → var(--bg)
+- #111, #1a1a1a → var(--card)
+- #333, #2a2a2a → var(--border)
+- #e0e0e0, #c9d1d9 → var(--text)
+- #888, #666, #555, #aaa, #777 → var(--dim)
+- #4a9eff → var(--blue)
+- #22c55e → var(--green)
+- #f59e0b → var(--yellow)
+- #ef4444 → var(--red)
+- #1a1a2e (user message bg) → rgba(88, 166, 255, 0.08) (subtle blue tint using the blue variable)
+
+## 2. Font Family
+
+Change from `system-ui, -apple-system, sans-serif` to match dashboard:
+```css
+font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+```
+
+Monospace stays: `'SF Mono', Menlo, Monaco, monospace`
+
+## 3. Replace Emoji with SVG Icons
+
+The paste buttons use &#x1F4CB; (clipboard emoji). Replace with inline SVG:
+
+Clipboard/paste icon (for both #claude-paste-btn and #shell-paste-btn):
+```html
+<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+```
+
+The send button uses &#x2191; (up arrow). Replace with SVG:
+```html
+<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+```
+
+The stop button uses &#x25A0; (square). In the JS where it sets sendBtn.textContent to the stop square, change it to set innerHTML with SVG:
+```html
+<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+```
+
+And the send arrow in JS (when switching back from stop):
+```html
+<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+```
+
+The copy button on assistant messages says "Copy" text. Replace with a small SVG icon, and "Copied!" becomes a checkmark SVG:
+
+Copy icon:
+```html
+<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+```
+
+Copied checkmark:
+```html
+<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>
+```
+
+The activity card collapse toggle uses unicode triangles (▶ and ▼). Replace with SVG arrows:
+
+Collapsed (right arrow):
+```html
+<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+```
+
+Expanded (down arrow):
+```html
+<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+```
+
+## 4. Header
+
+Match dashboard header style:
+```css
+#header {
+    height: 48px;
+    padding: 0 14px;
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+}
+```
+
+Title font: 15px, font-weight 600, color var(--text).
+
+Status dot colors:
+- ready → var(--green)
+- busy → var(--yellow) with pulse animation
+- dead → var(--red)
+- none → var(--dim)
+
+New Session button: match dashboard button style:
+```css
+#new-session-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--dim);
+    font-size: 12px;
+    padding: 5px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: inherit;
+}
+#new-session-btn:active { background: var(--bg); }
+```
+
+## 5. Tab Bar
+
+Keep tabs at top (not bottom like dashboard — makes sense for this layout). But style them to match:
+```css
+#tabs {
+    display: flex;
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+.tab {
+    flex: 1;
+    padding: 10px 0;
+    text-align: center;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--dim);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: color 0.15s, border-color 0.15s;
+    -webkit-tap-highlight-color: transparent;
+}
+.tab.active {
+    color: var(--blue);
+    border-bottom-color: var(--blue);
+}
+```
+
+## 6. Chat Messages
+
+User messages:
+```css
+.msg-user {
+    align-self: flex-end;
+    background: rgba(88, 166, 255, 0.08);
+    border: 1px solid rgba(88, 166, 255, 0.15);
+    border-bottom-right-radius: 4px;
+}
+```
+
+Assistant messages:
+```css
+.msg-assistant {
+    align-self: flex-start;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-bottom-left-radius: 4px;
+}
+```
+
+Code blocks inside messages:
+```css
+.msg-assistant pre {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+    margin: 8px 0;
+    overflow-x: auto;
+    font-size: 13px;
+    font-family: 'SF Mono', Menlo, Monaco, monospace;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+.msg-assistant code {
+    font-family: 'SF Mono', Menlo, Monaco, monospace;
+    font-size: 13px;
+    background: var(--bg);
+    padding: 1px 5px;
+    border-radius: 4px;
+}
+```
+
+## 7. Input Area
+
+```css
+#input-area {
+    padding: 8px 12px;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+    background: var(--card);
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+    flex-shrink: 0;
+}
+#prompt-input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 16px;
+    padding: 10px 14px;
+    resize: none;
+    font-family: inherit;
+    line-height: 1.4;
+    min-height: 44px;
+    max-height: 45vh;
+    overflow-y: auto;
+}
+#prompt-input:focus { outline: none; border-color: var(--blue); }
+#prompt-input::placeholder { color: var(--dim); }
+```
+
+Paste button:
+```css
+#claude-paste-btn {
+    width: 44px; height: 44px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--dim);
+    cursor: pointer;
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+}
+#claude-paste-btn:active { background: var(--card); }
+```
+
+Send button:
+```css
+#send-btn {
+    width: 44px; height: 44px;
+    border-radius: 8px;
+    border: none;
+    background: var(--blue);
+    color: #fff;
+    cursor: pointer;
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s;
+}
+#send-btn:disabled { background: var(--border); color: var(--dim); cursor: default; }
+#send-btn.stop-btn { background: var(--red); }
+```
+
+## 8. Activity Card
+
+```css
+.activity-card {
+    align-self: flex-start;
+    max-width: 88%;
+    padding: 8px 14px;
+    border-radius: 8px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    font-size: 13px;
+    color: var(--dim);
+    display: flex; align-items: center; gap: 8px;
+}
+.activity-card .spinner {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--yellow);
+    animation: pulse 1s infinite;
+    flex-shrink: 0;
+}
+```
+
+## 9. Error Messages
+
+```css
+.msg-error {
+    align-self: center;
+    background: rgba(248, 81, 73, 0.08);
+    border: 1px solid rgba(248, 81, 73, 0.3);
+    color: var(--red);
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-size: 13px;
+    text-align: center;
+}
+.msg-error button {
+    background: var(--red);
+    color: #fff;
+    border: none;
+    padding: 6px 14px;
+    border-radius: 6px;
+    margin-top: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    font-family: inherit;
+}
+```
+
+## 10. Shell Mode
+
+Match the xterm theme to dashboard colors:
+```javascript
+theme: {
+    background: '#0d1117',  // var(--bg)
+    foreground: '#c9d1d9',  // var(--text)
+    cursor: '#58a6ff',      // var(--blue)
+    selectionBackground: '#264f78',
+    black: '#0d1117', red: '#f85149', green: '#3fb950', yellow: '#d29922',
+    blue: '#58a6ff', magenta: '#bc8cff', cyan: '#39c5cf', white: '#c9d1d9',
+}
+```
+
+Shell paste button: same SVG icon as Claude paste, same border/bg style as the #claude-paste-btn.
+
+## 11. Log Panel
+
+```css
+#log-header {
+    padding: 8px 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+#log-content {
+    flex: 1; overflow-y: auto;
+    padding: 8px 12px;
+    font-family: 'SF Mono', Menlo, Monaco, monospace;
+    font-size: 12px;
+    color: var(--dim);
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    overscroll-behavior: none;
+    background: var(--bg);
+}
+```
+
+## 12. Add Dashboard Link
+
+Add a small link in the header (left side, before the title) that navigates back to the main dashboard:
+
+```html
+<a href="/" style="color: var(--dim); text-decoration: none; font-size: 12px; margin-right: 8px;">← Dashboard</a>
+```
+
+## Summary of What Changes
+
+- CSS: All colors → CSS variables, font family, border radii, shadows
+- HTML: All emoji → inline SVG icons
+- JS: sendBtn.textContent swaps → innerHTML with SVG
+- HTML: Add dashboard back-link in header
+- No backend changes
+- No logic changes
+- All existing functionality preserved
+
+After changes:
+1. python3 -m py_compile /opt/trading-platform/terminal.py
+2. supervisorctl restart platform-terminal
+3. Verify it looks like the same app as the dashboard

@@ -3961,289 +3961,6 @@ def logout():
     return resp
 
 
-@app.route("/api/deploy/upload", methods=["POST"])
-@requires_auth
-def api_deploy_upload():
-    """Upload .py files to the bot directory. Backs up existing files first."""
-    import subprocess, shutil
-    bot_dir = os.environ.get("BOT_DIR", "/opt/trading-platform")
-    backup_dir = os.path.join(bot_dir, "_backup")
-    os.makedirs(backup_dir, exist_ok=True)
-
-    uploaded = []
-    errors = []
-    backed_up = []
-
-    for key in request.files:
-        f = request.files[key]
-        if not f.filename.endswith('.py'):
-            errors.append(f"{f.filename}: not a .py file")
-            continue
-        content = f.read()
-        try:
-            compile(content, f.filename, 'exec')
-        except SyntaxError as e:
-            errors.append(f"{f.filename}: syntax error line {e.lineno}: {e.msg}")
-            continue
-        # Backup existing file
-        dest = os.path.join(bot_dir, f.filename)
-        if os.path.exists(dest):
-            shutil.copy2(dest, os.path.join(backup_dir, f.filename))
-            backed_up.append(f.filename)
-        with open(dest, 'wb') as out:
-            out.write(content)
-        uploaded.append(f.filename)
-
-    # Write backup manifest
-    if backed_up:
-        with open(os.path.join(backup_dir, "_manifest.json"), "w") as mf:
-            json.dump({"files": backed_up, "ts": now_utc()}, mf)
-
-    if uploaded:
-        insert_audit_log("deploy_upload", f"files={','.join(uploaded)}", ip=request.remote_addr or "")
-
-    return jsonify({"uploaded": uploaded, "errors": errors, "backed_up": backed_up})
-
-
-@app.route("/api/deploy/rollback", methods=["POST"])
-@requires_auth
-def api_deploy_rollback():
-    """Restore backed up files and restart services."""
-    import subprocess, shutil
-    bot_dir = os.environ.get("BOT_DIR", "/opt/trading-platform")
-    backup_dir = os.path.join(bot_dir, "_backup")
-    manifest_path = os.path.join(backup_dir, "_manifest.json")
-
-    if not os.path.exists(manifest_path):
-        return jsonify({"error": "No backup found"}), 404
-
-    with open(manifest_path) as mf:
-        manifest = json.load(mf)
-
-    restored = []
-    errors = []
-    for fname in manifest.get("files", []):
-        src = os.path.join(backup_dir, fname)
-        dest = os.path.join(bot_dir, fname)
-        if os.path.exists(src):
-            try:
-                shutil.copy2(src, dest)
-                restored.append(fname)
-            except Exception as e:
-                errors.append(f"{fname}: {e}")
-        else:
-            errors.append(f"{fname}: backup not found")
-
-    # Restart services
-    for svc in ["plugin-btc-15m", "platform-dashboard"]:
-        try:
-            subprocess.run(["supervisorctl", "restart", svc],
-                           capture_output=True, text=True, timeout=10)
-        except Exception:
-            pass
-
-    return jsonify({"restored": restored, "errors": errors})
-
-
-@app.route("/api/deploy/backup_info")
-@requires_auth
-def api_deploy_backup_info():
-    bot_dir = os.environ.get("BOT_DIR", "/opt/trading-platform")
-    manifest_path = os.path.join(bot_dir, "_backup", "_manifest.json")
-    if not os.path.exists(manifest_path):
-        return jsonify({"has_backup": False})
-    with open(manifest_path) as mf:
-        manifest = json.load(mf)
-    manifest["has_backup"] = True
-    manifest["ts_ct"] = to_central(manifest.get("ts", ""))
-    return jsonify(manifest)
-
-
-ROLLBACK_HTML = """<!DOCTYPE html>
-<html><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Rollback</title>
-<style>
-  body { font-family: -apple-system, sans-serif; background: #0d1117; color: #c9d1d9;
-         padding: 24px; max-width: 400px; margin: 0 auto; }
-  h1 { color: #f0883e; font-size: 20px; margin-bottom: 16px; }
-  .info { background: #161b22; border: 1px solid #30363d; border-radius: 8px;
-          padding: 16px; margin-bottom: 16px; font-size: 13px; }
-  .dim { color: #8b949e; }
-  .btn { display: block; width: 100%; padding: 14px; border: none; border-radius: 8px;
-         font-size: 15px; font-weight: 600; cursor: pointer; margin-bottom: 10px;
-         -webkit-tap-highlight-color: transparent; }
-  .btn-orange { background: #f0883e; color: #000; }
-  .btn-dim { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; }
-  .btn:disabled { opacity: 0.5; }
-  #status { margin-top: 12px; font-size: 13px; }
-  .green { color: #3fb950; }
-  .red { color: #f85149; }
-</style>
-</head><body>
-<h1>⚠ Emergency Rollback</h1>
-<div class="info">
-  <div id="backupInfo" class="dim">Checking for backup...</div>
-</div>
-<button class="btn btn-orange" id="rollbackBtn" onclick="doRollback()" disabled>
-  Restore Last Working Version
-</button>
-<button class="btn btn-dim" onclick="doRestart()">Just Restart Services</button>
-<div id="status"></div>
-<div style="margin-top:24px;text-align:center">
-  <a href="/" style="color:#58a6ff;font-size:13px">← Back to Dashboard</a>
-</div>
-<script>
-async function load() {
-  try {
-    const r = await fetch('/api/deploy/backup_info');
-    const d = await r.json();
-    const el = document.getElementById('backupInfo');
-    const btn = document.getElementById('rollbackBtn');
-    if (d.has_backup) {
-      el.innerHTML = '<strong style="color:#c9d1d9">Backup available</strong><br>'
-        + 'Files: ' + (d.files||[]).join(', ')
-        + '<br>Backed up: ' + (d.ts_ct || d.ts || '?');
-      btn.disabled = false;
-    } else {
-      el.textContent = 'No backup found. Nothing to rollback.';
-    }
-  } catch(e) {
-    document.getElementById('backupInfo').textContent = 'Error loading backup info: ' + e;
-  }
-}
-async function doRollback() {
-  const btn = document.getElementById('rollbackBtn');
-  const st = document.getElementById('status');
-  btn.disabled = true;
-  btn.textContent = 'Rolling back...';
-  st.innerHTML = '<span class="dim">Restoring files and restarting...</span>';
-  try {
-    const r = await fetch('/api/deploy/rollback', {method:'POST', headers:{'X-CSRF-Token':_getCsrfToken()}});
-    const d = await r.json();
-    if (d.error) {
-      st.innerHTML = '<span class="red">' + d.error + '</span>';
-      btn.disabled = false;
-      btn.textContent = 'Restore Last Working Version';
-    } else {
-      let html = '';
-      if (d.restored && d.restored.length) html += '<span class="green">Restored: ' + d.restored.join(', ') + '</span><br>';
-      if (d.errors && d.errors.length) html += d.errors.map(e => '<span class="red">' + e + '</span>').join('<br>');
-      html += '<br><span class="dim">Services restarting. Page will reload...</span>';
-      st.innerHTML = html;
-      setTimeout(() => location.href = '/', 4000);
-    }
-  } catch(e) {
-    st.innerHTML = '<span class="red">Error: ' + e + '</span>';
-    btn.disabled = false;
-    btn.textContent = 'Restore Last Working Version';
-  }
-}
-async function doRestart() {
-  const st = document.getElementById('status');
-  st.innerHTML = '<span class="dim">Restarting services...</span>';
-  try {
-    await fetch('/api/deploy/restart', {method:'POST',
-      headers:{'Content-Type':'application/json','X-CSRF-Token':_getCsrfToken()},
-      body: JSON.stringify({services:['plugin-btc-15m','platform-dashboard']})});
-    st.innerHTML = '<span class="green">Restarted. Redirecting...</span>';
-    setTimeout(() => location.href = '/', 4000);
-  } catch(e) {
-    st.innerHTML = '<span class="red">Error: ' + e + '</span>';
-  }
-}
-load();
-</script>
-</body></html>"""
-
-
-@app.route("/rollback")
-@requires_auth
-def rollback_page():
-    return render_template_string(ROLLBACK_HTML)
-
-
-@app.route("/api/deploy/paste", methods=["POST"])
-@requires_auth
-def api_deploy_paste():
-    """Deploy code from pasted text."""
-    import shutil
-    bot_dir = os.environ.get("BOT_DIR", "/opt/trading-platform")
-    backup_dir = os.path.join(bot_dir, "_backup")
-    os.makedirs(backup_dir, exist_ok=True)
-
-    data = request.get_json() or {}
-    filename = data.get("filename", "")
-    code = data.get("code", "")
-    force = data.get("force", False)
-
-    if not filename or not filename.endswith('.py'):
-        return jsonify({"error": "Invalid filename"}), 400
-    if not code.strip():
-        return jsonify({"error": "No code provided"}), 400
-
-    # Sanitize iOS/mobile Unicode replacements that break Python
-    replacements = {
-        '\u201c': '"', '\u201d': '"',   # smart double quotes
-        '\u2018': "'", '\u2019': "'",   # smart single quotes
-        '\u2013': '-', '\u2014': '-',   # en/em dashes
-        '\u2015': '-',                  # horizontal bar
-        '\u00a0': ' ',                  # non-breaking space
-        '\u2003': ' ', '\u2002': ' ',   # em/en space
-        '\u2009': ' ', '\u200a': ' ',   # thin/hair space
-        '\u200b': '',                   # zero-width space
-        '\u200c': '', '\u200d': '',     # zero-width non/joiner
-        '\ufeff': '',                   # BOM
-        '\u2026': '...',               # ellipsis
-        '\u2032': "'", '\u2033': '"',   # prime/double prime
-        '\uff08': '(', '\uff09': ')',   # fullwidth parens
-        '\uff1a': ':', '\uff1b': ';',   # fullwidth colon/semicolon
-        '\uff0c': ',', '\uff0e': '.',   # fullwidth comma/period
-        '\uff1d': '=',                 # fullwidth equals
-    }
-    for old, new in replacements.items():
-        code = code.replace(old, new)
-
-    # Validate Python syntax (skip with force)
-    if not force:
-        try:
-            compile(code, filename, 'exec')
-        except SyntaxError as e:
-            lines = code.split('\n')
-            bad_line = lines[e.lineno - 1] if e.lineno and e.lineno <= len(lines) else ''
-            non_ascii = [(i, c, hex(ord(c))) for i, c in enumerate(bad_line) if ord(c) > 127]
-            extra = ''
-            if non_ascii:
-                extra = ' | Non-ASCII chars: ' + ', '.join(f"col {i} {h}" for i, c, h in non_ascii[:5])
-            return jsonify({
-                "error": f"{filename} line {e.lineno}: {e.msg}{extra}",
-                "can_force": True,
-                "size": len(code),
-            }), 400
-
-    # Backup existing
-    dest = os.path.join(bot_dir, filename)
-    if os.path.exists(dest):
-        shutil.copy2(dest, os.path.join(backup_dir, filename))
-        # Merge into manifest (don't overwrite if multi-file deploy)
-        manifest_path = os.path.join(backup_dir, "_manifest.json")
-        try:
-            with open(manifest_path) as mf:
-                manifest = json.load(mf)
-            files = list(set(manifest.get("files", []) + [filename]))
-        except Exception:
-            files = [filename]
-        with open(manifest_path, "w") as mf:
-            json.dump({"files": files, "ts": now_utc()}, mf)
-
-    # Write new file
-    with open(dest, 'w') as f:
-        f.write(code)
-
-    return jsonify({"ok": True, "filename": filename, "size": len(code)})
-
-
 @app.route("/api/deploy/restart", methods=["POST"])
 @requires_auth
 def api_deploy_restart():
@@ -4280,28 +3997,6 @@ def api_deploy_restart():
     return jsonify(results)
 
 
-@app.route("/api/deploy/recheck_email", methods=["POST"])
-@requires_auth
-def api_deploy_recheck_email():
-    """Force the IMAP thread to reconnect and recheck for pending deploy emails."""
-    global _email_deploy_conn
-    conn = _email_deploy_conn
-    if conn is None:
-        return jsonify({"status": "no_connection", "msg": "Email deploy not connected — will check on next reconnect"})
-    try:
-        # Close the socket to break out of IDLE — the thread's except
-        # handler will catch it, reconnect, and check UNSEEN
-        conn.shutdown()
-    except Exception:
-        pass
-    try:
-        conn.socket().close()
-    except Exception:
-        pass
-    _email_deploy_conn = None
-    insert_log("INFO", "[EmailDeploy] Manual recheck triggered", "deploy")
-    return jsonify({"status": "ok", "msg": "IMAP reconnecting — will process pending emails"})
-
 
 @app.route("/")
 @requires_auth
@@ -4332,6 +4027,7 @@ MAIN_HTML = r"""<!DOCTYPE html>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#0d1117">
 <link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css">
 <title>Kalshi BTC Bot</title>
 <style>
   :root { --bg: #0d1117; --card: #161b22; --border: #30363d; --text: #c9d1d9;
@@ -4888,6 +4584,174 @@ MAIN_HTML = r"""<!DOCTYPE html>
   .skel-circle { border-radius: 50%; }
   .skel-wrap { transition: opacity 0.3s ease; }
   .skel-wrap.skel-hidden { opacity: 0; pointer-events: none; position: absolute; }
+
+  /* ── Terminal Tab ── */
+  #pageTerminal { display: none; flex-direction: column; overflow: hidden; padding: 0 !important; height: 100%; overscroll-behavior: none; }
+  #pageTerminal.active { display: flex !important; }
+  #term-sub-tabs {
+    display: flex; background: var(--card); border-bottom: 1px solid var(--border); flex-shrink: 0;
+  }
+  .term-sub-tab {
+    flex: 1; padding: 8px 0; text-align: center; font-size: 12px; font-weight: 500;
+    color: var(--dim); cursor: pointer; border-bottom: 2px solid transparent;
+    transition: color 0.15s, border-color 0.15s; -webkit-tap-highlight-color: transparent;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+  }
+  .term-sub-tab.active { color: var(--blue); border-bottom-color: var(--blue); }
+  .term-sub-tab .claude-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+  @keyframes term-pulse { 50% { opacity: 0.4; } }
+  .cdot-ready { background: var(--green); }
+  .cdot-busy { background: var(--yellow); animation: term-pulse 1s infinite; }
+  .cdot-dead { background: var(--red); }
+  .cdot-none { background: var(--dim); }
+  #term-new-session-btn {
+    background: none; border: 1px solid var(--border); color: var(--dim); font-size: 11px;
+    padding: 3px 10px; border-radius: 6px; cursor: pointer; font-family: inherit;
+    -webkit-tap-highlight-color: transparent; margin: auto 8px;
+  }
+  #term-new-session-btn:active { background: var(--bg); }
+  #term-panels { flex: 1; min-height: 0; position: relative; }
+  .term-panel { position: absolute; inset: 0; display: none; flex-direction: column; }
+  .term-panel.active { display: flex; }
+  #term-claude-panel { background: var(--bg); }
+  #term-conversation {
+    flex: 1; overflow-y: auto; padding: 12px; -webkit-overflow-scrolling: touch;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  #term-conversation .msg { max-width: 88%; padding: 10px 14px; border-radius: 16px; font-size: 15px;
+    line-height: 1.5; word-wrap: break-word; position: relative; }
+  #term-conversation .msg-user {
+    align-self: flex-end; background: rgba(88, 166, 255, 0.08);
+    border: 1px solid rgba(88, 166, 255, 0.15); border-bottom-right-radius: 4px; white-space: pre-wrap;
+  }
+  #term-conversation .msg-assistant {
+    align-self: flex-start; background: var(--card); border: 1px solid var(--border); border-bottom-left-radius: 4px;
+  }
+  #term-conversation .msg-assistant pre {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px; margin: 8px 0; overflow-x: auto; font-size: 13px;
+    font-family: 'SF Mono', Menlo, Monaco, monospace; white-space: pre-wrap; word-wrap: break-word;
+  }
+  #term-conversation .msg-assistant code {
+    font-family: 'SF Mono', Menlo, Monaco, monospace; font-size: 13px;
+    background: var(--bg); padding: 1px 5px; border-radius: 4px;
+  }
+  #term-conversation .msg-assistant pre code { background: none; padding: 0; }
+  #term-conversation .msg-assistant strong { color: #f0f0f0; }
+  #term-conversation .copy-btn {
+    position: absolute; bottom: 6px; right: 6px; background: rgba(255,255,255,0.08);
+    border: none; color: var(--dim); font-size: 11px; padding: 3px 8px; border-radius: 6px;
+    cursor: pointer; opacity: 0; transition: opacity 0.15s;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #term-conversation .msg-assistant:hover .copy-btn,
+  #term-conversation .msg-assistant:active .copy-btn { opacity: 1; }
+  #term-conversation .copy-btn.copied { color: var(--green); }
+  #term-conversation .activity-card {
+    align-self: flex-start; max-width: 88%; padding: 8px 14px; border-radius: 8px;
+    background: var(--card); border: 1px solid var(--border); font-size: 13px; color: var(--dim);
+    display: flex; align-items: center; gap: 8px;
+  }
+  #term-conversation .activity-card .spinner {
+    width: 8px; height: 8px; border-radius: 50%; background: var(--yellow);
+    animation: term-pulse 1s infinite; flex-shrink: 0;
+  }
+  #term-conversation .activity-collapsed {
+    font-size: 12px; color: var(--dim); cursor: pointer; align-self: flex-start; padding: 2px 0; margin-top: -8px;
+  }
+  #term-conversation .activity-collapsed:hover { color: var(--text); }
+  #term-conversation .activity-log {
+    display: none; align-self: flex-start; max-width: 88%; padding: 8px 12px;
+    background: var(--card); border-radius: 8px; font-size: 12px; color: var(--dim);
+    font-family: monospace; white-space: pre-wrap; margin-top: -8px;
+  }
+  #term-conversation .msg-error {
+    align-self: center; background: rgba(248, 81, 73, 0.08); border: 1px solid rgba(248, 81, 73, 0.3);
+    color: var(--red); border-radius: 8px; padding: 10px 16px; font-size: 13px; text-align: center;
+  }
+  #term-conversation .msg-error button {
+    background: var(--red); color: #fff; border: none; padding: 6px 14px;
+    border-radius: 6px; margin-top: 8px; cursor: pointer; font-size: 13px; font-family: inherit;
+  }
+  #term-conversation .msg-system {
+    align-self: center; background: rgba(88, 166, 255, 0.06); border: 1px solid rgba(88, 166, 255, 0.15);
+    color: var(--blue); border-radius: 8px; padding: 6px 14px; font-size: 12px; text-align: center;
+  }
+  #term-conversation .session-divider {
+    text-align: center; color: var(--dim); font-size: 11px; padding: 8px 0;
+    border-top: 1px solid var(--border); margin-top: 4px;
+  }
+  #term-input-area {
+    padding: 8px 12px 8px;
+    background: var(--card); border-top: 1px solid var(--border); display: flex; gap: 8px;
+    align-items: flex-end; flex-shrink: 0;
+  }
+  #term-claude-paste-btn {
+    width: 44px; height: 44px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--dim); cursor: pointer;
+    flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  }
+  #term-claude-paste-btn:active { background: var(--card); }
+  #term-prompt-input {
+    flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text); font-size: 16px; padding: 10px 14px; resize: none;
+    font-family: inherit; line-height: 1.4; min-height: 44px; max-height: 45vh; overflow-y: auto;
+  }
+  #term-prompt-input::placeholder { color: var(--dim); }
+  #term-prompt-input:focus { outline: none; border-color: var(--blue); }
+  #term-send-btn {
+    width: 44px; height: 44px; border-radius: 8px; border: none;
+    background: var(--blue); color: #fff; cursor: pointer;
+    flex-shrink: 0; display: flex; align-items: center; justify-content: center; transition: background 0.15s;
+  }
+  #term-send-btn:disabled { background: var(--border); color: var(--dim); cursor: default; }
+  #term-send-btn.stop-btn { background: var(--red); }
+  #term-shell-panel { background: var(--bg); }
+  #term-quick-actions {
+    flex-shrink: 0; border-bottom: 1px solid var(--border); background: var(--card);
+    overflow: hidden; transition: max-height 0.2s ease;
+  }
+  #term-quick-actions.collapsed { max-height: 21px; }
+  #term-quick-actions.expanded { max-height: 120px; }
+  #term-qa-toggle {
+    display: flex; align-items: center; gap: 6px; padding: 5px 12px;
+    font-size: 11px; color: var(--dim); cursor: pointer; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #term-qa-toggle svg { transition: transform 0.2s; }
+  #term-quick-actions.expanded #term-qa-toggle svg { transform: rotate(90deg); }
+  #term-qa-buttons { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 8px; }
+  .term-qa-btn {
+    background: var(--bg); border: 1px solid var(--border); color: var(--dim);
+    font-size: 12px; padding: 4px 10px; border-radius: 12px; cursor: pointer;
+    font-family: inherit; white-space: nowrap; -webkit-tap-highlight-color: transparent;
+  }
+  .term-qa-btn:active { background: var(--card); color: var(--text); }
+  #term-shell-wrap { flex: 1; min-height: 0; position: relative; }
+  #term-shell-wrap .xterm { height: 100%; }
+  #term-shell-paste-btn {
+    position: absolute; bottom: 16px; right: 16px; z-index: 10;
+    width: 44px; height: 44px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--dim); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #term-shell-paste-btn:hover { background: var(--card); }
+  #term-log-panel { background: var(--bg); }
+  #term-log-header {
+    padding: 8px 12px; display: flex; justify-content: space-between; align-items: center;
+    border-bottom: 1px solid var(--border); flex-shrink: 0;
+  }
+  #term-log-header span { font-size: 12px; color: var(--dim); }
+  #term-log-clear-btn {
+    background: none; border: 1px solid var(--border); color: var(--dim); font-size: 11px;
+    padding: 3px 10px; border-radius: 4px; cursor: pointer;
+  }
+  #term-log-content {
+    flex: 1; overflow-y: auto; padding: 8px 12px;
+    font-family: 'SF Mono', Menlo, Monaco, monospace;
+    font-size: 12px; color: var(--dim); white-space: pre-wrap; word-wrap: break-word;
+    overscroll-behavior: none; background: var(--bg);
+  }
 
 </style>
 </head>
@@ -5655,40 +5519,6 @@ MAIN_HTML = r"""<!DOCTYPE html>
     </div>
     <button class="btn btn-blue" style="width:100%;margin-bottom:8px" onclick="svcControl('restart','all')">Restart All Services</button>
 
-    <div class="sc-sub">DEPLOY CODE</div>
-    <div style="display:flex;gap:8px;align-items:center">
-      <label style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:12px;background:var(--bg);border:1px dashed var(--border);border-radius:6px;cursor:pointer;font-size:13px;color:var(--dim);-webkit-tap-highlight-color:transparent">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
-        <span id="deployFileLabel">Upload .py files</span>
-        <input type="file" id="deployFiles" accept=".py" multiple style="display:none" onchange="onDeployFilesSelected(this)">
-      </label>
-    </div>
-    <div id="deployFileList" style="margin-top:6px;font-size:11px"></div>
-    <div style="display:flex;gap:8px;margin-top:8px">
-      <button class="btn btn-blue" id="deployUploadBtn" onclick="doDeploy()" style="flex:1;display:none">Upload & Restart</button>
-    </div>
-    <div id="deployStatus" style="margin-top:6px;font-size:11px"></div>
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
-      <span id="deployBackupInfo" class="dim" style="font-size:10px"></span>
-      <a href="/rollback" style="color:var(--orange);font-size:10px">Rollback</a>
-    </div>
-
-    <span class="detail-toggle" onclick="toggleDetail('emailDeploySection')">▸ Email Deploy Setup</span>
-    <div class="detail-section" id="emailDeploySection">
-      <div style="font-size:11px;color:var(--dim);line-height:1.6">
-        <div style="font-weight:600;color:var(--text);margin-bottom:2px">Setup (one time):</div>
-        <div>1. Create a Gmail with an App Password</div>
-        <div>2. Add to <code style="background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px;font-size:10px">.env</code>:</div>
-        <div style="background:rgba(0,0,0,0.3);border-radius:4px;padding:6px 8px;margin:4px 0;font-family:monospace;font-size:10px;line-height:1.5;color:var(--text)">
-          DEPLOY_EMAIL=bot@gmail.com<br>
-          DEPLOY_EMAIL_PASS=xxxx xxxx xxxx xxxx<br>
-          DEPLOY_ALLOWED_SENDERS=you@email.com
-        </div>
-        <div style="font-weight:600;color:var(--text);margin-top:10px;margin-bottom:2px">Usage:</div>
-        <div>Email .py attachments to deploy. Add <code style="background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px;font-size:10px">pip: package</code> or <code style="background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px;font-size:10px">restart: all</code> in body.</div>
-      </div>
-    </div>
-
   </div>
 
   <!-- ─── OBSERVATION RULES ─── -->
@@ -5914,6 +5744,51 @@ MAIN_HTML = r"""<!DOCTYPE html>
 </div>
 
 
+<!-- ═══ PAGE: TERMINAL ═══ -->
+<div id="pageTerminal" class="page">
+  <div id="term-sub-tabs">
+    <div class="term-sub-tab active" data-tab="claude"><span id="term-claude-dot" class="claude-dot cdot-none"></span>Claude</div>
+    <div class="term-sub-tab" data-tab="shell">Shell</div>
+    <div class="term-sub-tab" data-tab="log">Log</div>
+    <button id="term-new-session-btn">New</button>
+  </div>
+  <div id="term-panels">
+    <div id="term-claude-panel" class="term-panel active">
+      <div id="term-conversation"></div>
+      <div id="term-input-area">
+        <button id="term-claude-paste-btn" title="Paste"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M12 11v6"/><path d="M9 14l3 3 3-3"/></svg></button>
+        <textarea id="term-prompt-input" rows="1" placeholder="Send a prompt to Claude Code..."></textarea>
+        <button id="term-send-btn" title="Send"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></button>
+      </div>
+    </div>
+    <div id="term-shell-panel" class="term-panel">
+      <div id="term-quick-actions" class="collapsed">
+        <div id="term-qa-toggle"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>Quick Actions</div>
+        <div id="term-qa-buttons">
+          <button class="term-qa-btn" data-cmd="supervisorctl restart plugin-btc-15m">Restart Bot</button>
+          <button class="term-qa-btn" data-cmd="supervisorctl restart platform-dashboard">Restart Dashboard</button>
+          <button class="term-qa-btn" data-cmd="tail -50 /var/log/plugin-btc-15m.err.log">Bot Logs</button>
+          <button class="term-qa-btn" data-cmd="tail -50 /var/log/platform-dashboard.err.log">Dash Logs</button>
+          <button class="term-qa-btn" data-cmd="supervisorctl status">Status</button>
+          <button class="term-qa-btn" data-cmd="df -h /">Disk</button>
+          <button class="term-qa-btn term-model-btn" data-model="sonnet" style="border-color:rgba(88,166,255,0.3);color:var(--blue)">Sonnet</button>
+          <button class="term-qa-btn term-model-btn" data-model="opus" style="border-color:rgba(163,113,247,0.3);color:#a371f7">Opus</button>
+        </div>
+      </div>
+      <div id="term-shell-wrap">
+        <button id="term-shell-paste-btn" title="Paste from clipboard"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M12 11v6"/><path d="M9 14l3 3 3-3"/></svg></button>
+      </div>
+    </div>
+    <div id="term-log-panel" class="term-panel">
+      <div id="term-log-header">
+        <span>Raw Claude Code Output</span>
+        <button id="term-log-clear-btn">Clear</button>
+      </div>
+      <div id="term-log-content"></div>
+    </div>
+  </div>
+</div>
+
 </div> <!-- end contentWrap -->
 
 <!-- Trade Detail Popup (outside contentWrap for reliable fixed positioning on iOS) -->
@@ -5945,6 +5820,10 @@ MAIN_HTML = r"""<!DOCTYPE html>
 
 <!-- Bottom Tab Bar -->
 <div class="tab-bar">
+  <button class="tab-btn tab-active" data-tab="Home" onclick="switchTab('Home')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+    <span>Home</span>
+  </button>
   <button class="tab-btn" data-tab="Trades" onclick="switchTab('Trades')">
     <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5 7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5"/></svg>
     <span>Trades</span>
@@ -5953,13 +5832,13 @@ MAIN_HTML = r"""<!DOCTYPE html>
     <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
     <span>Regimes</span>
   </button>
-  <button class="tab-btn tab-active" data-tab="Home" onclick="switchTab('Home')">
-    <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-    <span>Home</span>
-  </button>
   <button class="tab-btn" data-tab="Stats" onclick="switchTab('Stats')">
     <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="12" width="4" height="9" rx="1"/><rect x="10" y="7" width="4" height="14" rx="1"/><rect x="17" y="3" width="4" height="18" rx="1"/></svg>
     <span>Stats</span>
+  </button>
+  <button class="tab-btn" data-tab="Terminal" onclick="switchTab('Terminal')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+    <span>Terminal</span>
   </button>
   <button class="tab-btn" data-tab="Settings" onclick="switchTab('Settings')">
     <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"/><circle cx="12" cy="12" r="3"/></svg>
@@ -5967,6 +5846,10 @@ MAIN_HTML = r"""<!DOCTYPE html>
   </button>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/socket.io-client@4.7.2/dist/socket.io.min.js"></script>
 <script>
 const $ = s => document.querySelector(s);
 function _cw() { return document.getElementById('contentWrap'); }
@@ -6111,7 +5994,7 @@ function fallbackCopy(text, resolve, reject) {
   document.addEventListener('touchstart', e => {
     const scroller = getScroller();
     const atTop = scroller ? scroller.scrollTop <= 0 : true;
-    if (atTop && e.touches.length === 1 && !isModalOpen() && !_chartTouchActive && _filterSheet.pos === 'closed') {
+    if (atTop && e.touches.length === 1 && !isModalOpen() && !_chartTouchActive && _filterSheet.pos === 'closed' && _currentTab !== 'Terminal') {
       startY = e.touches[0].clientY;
       pulling = true;
       triggered = false;
@@ -7399,8 +7282,7 @@ function showToast(msg, color) {
     teal:   {bg: 'rgba(45,212,191,0.12)',  border: 'rgba(45,212,191,0.4)',  fg: '#2dd4bf'},
   };
   const c = colors[color] || colors.green;
-  const _hdr = document.getElementById('stickyHeader');
-  t.style.top = ((_hdr ? _hdr.offsetHeight : 60) + 8) + 'px';
+  t.style.top = '8px';
   t.style.background = c.bg;
   t.style.borderColor = c.border;
   t.style.color = c.fg;
@@ -8069,12 +7951,13 @@ function renderUI(s) {
 
 }
 
+var _termKeyboardOpen = false;
 function _adjustContentTop() {
   const hdr = document.getElementById('stickyHeader');
   const cw = document.getElementById('contentWrap');
   const tb = document.querySelector('.tab-bar');
   if (hdr && cw) cw.style.top = hdr.offsetHeight + 'px';
-  if (tb && cw) cw.style.bottom = tb.offsetHeight + 'px';
+  if (tb && cw) cw.style.bottom = _termKeyboardOpen ? '0' : (tb.offsetHeight + 'px');
 }
 window.addEventListener('resize', _adjustContentTop);
 
@@ -12465,125 +12348,6 @@ function doLogout() {
   window.location.href = '/logout';
 }
 
-// ── Deploy ──────────────────────────────────────────────
-let _deployFiles = [];
-
-function onDeployFilesSelected(input) {
-  _deployFiles = Array.from(input.files);
-  const label = $('#deployFileLabel');
-  const list = $('#deployFileList');
-  const btn = $('#deployUploadBtn');
-  if (_deployFiles.length) {
-    label.textContent = `${_deployFiles.length} file${_deployFiles.length > 1 ? 's' : ''} selected`;
-    list.innerHTML = _deployFiles.map(f =>
-      `<div style="color:var(--text)">· ${f.name} <span class="dim">(${(f.size/1024).toFixed(1)}KB)</span></div>`
-    ).join('');
-    btn.style.display = '';
-  } else {
-    label.textContent = 'Choose .py files';
-    list.innerHTML = '';
-    btn.style.display = 'none';
-  }
-}
-
-async function doDeploy() {
-  const status = $('#deployStatus');
-  const btn = $('#deployUploadBtn');
-  if (!_deployFiles.length) return;
-
-  btn.disabled = true;
-  btn.textContent = 'Uploading...';
-  status.innerHTML = '<span style="color:var(--blue)">Uploading files...</span>';
-
-  try {
-    const form = new FormData();
-    _deployFiles.forEach((f, i) => form.append('file' + i, f));
-
-    const resp = await fetch('/api/deploy/upload', {method: 'POST', body: form, headers:{'X-CSRF-Token':_getCsrfToken()}});
-    if (!resp.ok) {
-      const txt = await resp.text();
-      throw new Error(`Upload failed (${resp.status}): ${txt.substring(0, 120)}`);
-    }
-    const text = await resp.text();
-    let data;
-    try { data = JSON.parse(text); } catch(pe) {
-      throw new Error('Server returned invalid response: ' + text.substring(0, 120));
-    }
-
-    let html = '';
-    if (data.uploaded && data.uploaded.length) {
-      html += `<div style="color:var(--green)">Uploaded: ${data.uploaded.join(', ')}</div>`;
-    }
-    if (data.errors && data.errors.length) {
-      html += data.errors.map(e => `<div style="color:var(--red)">${e}</div>`).join('');
-    }
-
-    if (data.uploaded && data.uploaded.length && (!data.errors || !data.errors.length)) {
-      // Smart restart: dashboard-only files skip bot restart
-      const dashOnly = data.uploaded.every(f => f === 'dashboard.py');
-      const svcs = dashOnly ? ['platform-dashboard'] : ['plugin-btc-15m', 'platform-dashboard'];
-      const svcLabel = dashOnly ? 'dashboard' : 'services';
-      html += `<span style="color:var(--blue)">Restarting ${svcLabel}...</span>`;
-      status.innerHTML = html;
-
-      // Auto-restart — fire and forget since dashboard kills itself
-      fetch('/api/deploy/restart', {
-        method: 'POST',
-        headers:{'Content-Type':'application/json','X-CSRF-Token':_getCsrfToken()},
-        body: JSON.stringify({services: svcs})
-      }).catch(() => {});
-      html += `<div style="color:var(--green);margin-top:4px">Restarted. Page will reload...</div>`;
-      status.innerHTML = html;
-      // Dashboard is restarting — wait then reload
-      setTimeout(() => location.reload(), 3000);
-    } else {
-      status.innerHTML = html;
-      btn.disabled = false;
-      btn.textContent = 'Upload & Restart';
-    }
-  } catch(e) {
-    status.innerHTML = `<div style="color:var(--red)">Error: ${e}</div>`;
-    btn.disabled = false;
-    btn.textContent = 'Upload & Restart';
-  }
-}
-
-async function doRestart() {
-  const status = $('#deployStatus');
-  const btn = $('#deployRestartBtn');
-  btn.disabled = true;
-  btn.textContent = 'Restarting...';
-  status.innerHTML = '<span style="color:var(--blue)">Restarting (pending deploys process on startup)...</span>';
-
-  try {
-    // Just restart — the email deploy thread starts fresh on boot and
-    // checks UNSEEN emails, which processes any pending deploys.
-    fetch('/api/deploy/restart', {
-      method: 'POST',
-      headers:{'Content-Type':'application/json','X-CSRF-Token':_getCsrfToken()},
-      body: JSON.stringify({services: ['plugin-btc-15m', 'platform-dashboard']})
-    }).catch(() => {});
-    status.innerHTML = '<div style="color:var(--green)">Restarted. Page will reload...</div>';
-    setTimeout(() => location.reload(), 5000);
-  } catch(e) {
-    status.innerHTML = `<div style="color:var(--red)">Error: ${e}</div>`;
-    btn.disabled = false;
-    btn.textContent = 'Restart Services';
-  }
-}
-
-async function loadBackupInfo() {
-  try {
-    const d = await api('/api/deploy/backup_info');
-    const el = $('#deployBackupInfo');
-    if (d.has_backup) {
-      el.innerHTML = `Last backup: ${(d.files||[]).join(', ')} · ${d.ts_ct || '?'}`;
-    } else {
-      el.textContent = 'No backup yet';
-    }
-  } catch(e) {}
-}
-
 // ── Skip conditions viewer ───────────────────────────────
 async function loadSkipConditions() {
   const el = $('#skipConditionsList');
@@ -12734,148 +12498,6 @@ async function _executeReset() {
     }
   } catch(e) { showToast('Reset failed: ' + e.message, 'red'); }
 }
-document.addEventListener('input', e => {
-  if (e.target.id === 'pasteCode') {
-    const len = e.target.value.length;
-    const el = $('#pasteCharCount');
-    if (el) el.textContent = len > 0 ? `${(len/1024).toFixed(1)}KB` : '';
-  }
-});
-
-let _pasteQueue = [];  // [{filename, code}]
-
-function renderPasteQueue() {
-  const el = $('#pasteQueue');
-  if (!_pasteQueue.length) { el.innerHTML = ''; return; }
-  el.innerHTML = _pasteQueue.map((item, i) =>
-    `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;margin-bottom:4px;background:var(--bg);border-radius:4px;font-size:12px">
-      <span style="color:var(--text)">${item.filename} <span class="dim">(${(item.code.length/1024).toFixed(1)}KB)</span></span>
-      <button onclick="_pasteQueue.splice(${i},1);renderPasteQueue()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px;padding:2px 6px">×</button>
-    </div>`
-  ).join('');
-}
-
-function addToQueue() {
-  const filename = $('#pasteFilename').value;
-  const code = $('#pasteCode').value;
-  const status = $('#deployStatus');
-  if (!code.trim()) { status.innerHTML = '<span style="color:var(--red)">Paste code first</span>'; return; }
-
-  // Replace if same filename already queued
-  _pasteQueue = _pasteQueue.filter(q => q.filename !== filename);
-  _pasteQueue.push({filename, code});
-  renderPasteQueue();
-
-  // Clear textarea for next file
-  $('#pasteCode').value = '';
-  $('#pasteCharCount').textContent = '';
-  status.innerHTML = `<span style="color:var(--green)">${filename} queued (${_pasteQueue.length} file${_pasteQueue.length>1?'s':''} ready)</span>`;
-}
-
-async function deployPasted() {
-  const status = $('#deployStatus');
-
-  // If textarea has content but not queued yet, add it first
-  const code = $('#pasteCode').value;
-  if (code.trim()) {
-    addToQueue();
-  }
-
-  if (!_pasteQueue.length) { status.innerHTML = '<span style="color:var(--red)">Nothing to deploy</span>'; return; }
-
-  const btn = $('#deployPasteBtn');
-  btn.disabled = true;
-  btn.textContent = '...';
-  status.innerHTML = `<span style="color:var(--blue)">Deploying ${_pasteQueue.length} file${_pasteQueue.length>1?'s':''}...</span>`;
-
-  let allOk = true;
-  let results = [];
-  let errorTexts = [];
-  let hasForceableError = false;
-
-  for (const item of _pasteQueue) {
-    try {
-      const resp = await fetch('/api/deploy/paste', {
-        method: 'POST',
-        headers:{'Content-Type':'application/json','X-CSRF-Token':_getCsrfToken()},
-        body: JSON.stringify({filename: item.filename, code: item.code, force: item.force || false})
-      });
-      const data = await resp.json();
-      if (!resp.ok || data.error) {
-        const errMsg = data.error || 'Unknown error';
-        const sizeInfo = data.size ? ` (received ${(data.size/1024).toFixed(1)}KB)` : '';
-        results.push(`<span style="color:var(--red)">${errMsg}${sizeInfo}</span>`);
-        errorTexts.push(errMsg + sizeInfo);
-        if (data.can_force) hasForceableError = true;
-        allOk = false;
-      } else {
-        results.push(`<span style="color:var(--green)">${item.filename} ✓ (${(data.size/1024).toFixed(1)}KB)</span>`);
-      }
-    } catch(e) {
-      const errMsg = `${item.filename}: ${e}`;
-      results.push(`<span style="color:var(--red)">${errMsg}</span>`);
-      errorTexts.push(errMsg);
-      allOk = false;
-    }
-  }
-
-  let html = results.join('<br>');
-  if (!allOk && errorTexts.length) {
-    _lastDeployError = errorTexts.join('\n');
-    html += `<div style="display:flex;gap:6px;margin-top:6px">`;
-    html += `<button onclick="copyDeployError()" style="background:none;border:1px solid var(--border);border-radius:4px;padding:3px 8px;color:var(--dim);cursor:pointer;font-size:10px">Copy error</button>`;
-    if (hasForceableError) {
-      html += `<button onclick="forceDeployAll()" style="background:none;border:1px solid rgba(248,81,73,0.3);border-radius:4px;padding:3px 8px;color:var(--red);cursor:pointer;font-size:10px">Force deploy (skip validation)</button>`;
-    }
-    html += `</div>`;
-  }
-  status.innerHTML = html;
-
-  if (allOk) {
-    status.innerHTML += '<br><span style="color:var(--blue)">Restarting...</span>';
-    try {
-      await api('/api/deploy/restart', {
-        method: 'POST',
-        headers:{'Content-Type':'application/json','X-CSRF-Token':_getCsrfToken()},
-        body: JSON.stringify({services: ['plugin-btc-15m', 'platform-dashboard']})
-      });
-      status.innerHTML += ' <span style="color:var(--green)">Done! Reloading...</span>';
-      _pasteQueue = [];
-      renderPasteQueue();
-      setTimeout(() => location.reload(), 3000);
-    } catch(e) {
-      status.innerHTML += `<br><span style="color:var(--red)">Restart error: ${e}</span>`;
-    }
-  }
-
-  btn.disabled = false;
-  btn.textContent = 'Deploy';
-}
-
-let _lastDeployError = '';
-function copyDeployError() {
-  if (_lastDeployError) {
-    navigator.clipboard.writeText(_lastDeployError).then(
-      () => showToast('Error copied', 'blue'),
-      () => {
-        const ta = document.createElement('textarea');
-        ta.value = _lastDeployError;
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-        showToast('Error copied', 'blue');
-      }
-    );
-  }
-}
-
-function forceDeployAll() {
-  $('#pasteCode').value = '';  // prevent re-queue without force
-  _pasteQueue.forEach(item => item.force = true);
-  deployPasted();
-}
-
 async function exportAIData(btn) {
   const orig = btn.textContent;
   btn.textContent = 'Generating...';
@@ -12957,14 +12579,35 @@ function switchTab(tab) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('tab-active'));
   document.querySelectorAll('.tab-btn[data-tab="' + tab + '"]').forEach(b => b.classList.add('tab-active'));
 
-  // Scroll to top
-  scrollTop();
+  // Terminal needs flex layout; other tabs need normal scroll
+  const cw = document.getElementById('contentWrap');
+  if (tab === 'Terminal') {
+    cw.style.overflow = 'hidden';
+    cw.style.padding = '0';
+    cw.style.display = 'flex';
+    cw.style.flexDirection = 'column';
+    cw.style.overscrollBehavior = 'none';
+    document.body.style.overscrollBehavior = 'none';
+    document.body.style.background = '#161b22';
+    document.querySelector('meta[name="theme-color"]').content = '#161b22';
+  } else {
+    cw.style.overflow = '';
+    cw.style.padding = '';
+    cw.style.overscrollBehavior = '';
+    document.body.style.overscrollBehavior = '';
+    cw.style.display = '';
+    cw.style.flexDirection = '';
+    document.body.style.background = '';
+    document.querySelector('meta[name="theme-color"]').content = '#0d1117';
+    scrollTop();
+  }
 
   // Tab-specific setup
   if (tab === 'Stats') { statsGoBack(); _loadLifetimeStatsInner(); }
   else if (tab === 'Regimes') { loadBtcChart(); loadRegimes(); loadRegimeWorkerStatus(); }
   else if (tab === 'Trades') loadTrades();
-  else if (tab === 'Settings') { loadConfig(); loadBackupInfo(); loadSvcStatus(); loadSystemStats(); }
+  else if (tab === 'Settings') { loadConfig(); loadSvcStatus(); loadSystemStats(); }
+  else if (tab === 'Terminal') { try { _termInit(); } catch(e) { console.error('Terminal init error:', e); document.getElementById('term-conversation').textContent = 'Error: ' + e.message; } }
 }
 
 // Backfill live price chart from server history
@@ -13062,14 +12705,406 @@ pollState();
 _adjustContentTop();
 setTimeout(_adjustContentTop, 500);
 
-// Restore last active tab
-try {
-  const savedTab = sessionStorage.getItem('_tab');
-  if (savedTab && savedTab !== 'Home') {
-    const _savedRaw = savedTab === 'Bitcoin' ? 'Regimes' : savedTab;
-    const tab = (_savedRaw === 'Chat' || _savedRaw === 'Arcade') ? 'Home' : _savedRaw;
-    if (document.getElementById('page' + tab)) switchTab(tab);
+// ═══════════════════════════════════════════════════
+//  TERMINAL TAB (lazy-initialized)
+// ═══════════════════════════════════════════════════
+
+var _termReady = false;
+function _termInit() {
+  if (_termReady) {
+    // Re-fit shell if returning to shell sub-tab
+    if (_termShellInit && _termSubTab === 'shell' && _termFit) { _termFit.fit(); _termXt.focus(); }
+    return;
   }
+  _termReady = true;
+
+  var _ts = io('/terminal/ws', { path: '/terminal/ws/socket.io', transports: ['websocket'],
+    reconnection: true, reconnectionDelay: 1000, reconnectionDelayMax: 5000 });
+  var _termSubTab = 'claude';
+  var _termShellInit = false;
+  var _termXt, _termFit;
+  var _tconv = document.getElementById('term-conversation');
+  var _tpi = document.getElementById('term-prompt-input');
+  var _tsb = document.getElementById('term-send-btn');
+  var _tcd = document.getElementById('term-claude-dot');
+  var _tlc = document.getElementById('term-log-content');
+  var _tState = 'none', _tSessionStarting = false, _tActCard = null, _tActLog = [];
+  var _tAutoScroll = true, _tDbSid = null, _tCsSid = null, _tBackendAlive = false;
+  var _tRendered = 0, _tOldestId = null, _tTotal = 0, _tLoadingOlder = false, _tPS = 50;
+  var _tPendingRestart = false;
+
+  // Sub-tab switching
+  function _termSwitchSub(name) {
+    _termSubTab = name;
+    document.querySelectorAll('#pageTerminal .term-sub-tab').forEach(function(t) { t.classList.toggle('active', t.dataset.tab === name); });
+    document.querySelectorAll('#pageTerminal .term-panel').forEach(function(p) { p.classList.toggle('active', p.id === 'term-' + name + '-panel'); });
+    if (name === 'shell' && !_termShellInit) _termInitShell();
+    if (name === 'shell' && _termShellInit) { _termFit.fit(); _termXt.focus(); }
+  }
+  document.querySelectorAll('#pageTerminal .term-sub-tab').forEach(function(t) {
+    t.addEventListener('click', function() { _termSwitchSub(t.dataset.tab); });
+  });
+
+  // Shell
+  function _termInitShell() {
+    if (_termShellInit) return;
+    _termShellInit = true;
+    _ts.emit('shell_start');
+    _termXt = new Terminal({ cursorBlink: true, fontSize: 16,
+      fontFamily: '"SF Mono", Menlo, Monaco, "Courier New", monospace',
+      theme: { background: '#0d1117', foreground: '#c9d1d9', cursor: '#58a6ff', selectionBackground: '#264f78',
+        black: '#0d1117', red: '#f85149', green: '#3fb950', yellow: '#d29922',
+        blue: '#58a6ff', magenta: '#bc8cff', cyan: '#39c5cf', white: '#c9d1d9',
+        brightBlack: '#484f58', brightRed: '#ffa198', brightGreen: '#56d364',
+        brightYellow: '#e3b341', brightBlue: '#79c0ff', brightMagenta: '#d2a8ff',
+        brightCyan: '#56d4dd', brightWhite: '#f0f6fc' },
+      allowProposedApi: true, scrollback: 5000 });
+    _termFit = new FitAddon.FitAddon();
+    _termXt.loadAddon(_termFit);
+    _termXt.loadAddon(new WebLinksAddon.WebLinksAddon());
+    _termXt.open(document.getElementById('term-shell-wrap'));
+    _termFit.fit();
+    _termXt.onData(function(data) { _ts.emit('input', data); });
+    var ro = new ResizeObserver(function() {
+      if (_termSubTab === 'shell' && _termFit) { _termFit.fit();
+        var d = _termFit.proposeDimensions(); if (d) _ts.emit('resize', {rows: d.rows, cols: d.cols}); }
+    });
+    ro.observe(document.getElementById('term-shell-wrap'));
+  }
+
+  // Socket events — shell
+  _ts.on('connect', function() {
+    if (_tPendingRestart) {
+      _tPendingRestart = false;
+      setTimeout(function() { location.reload(); }, 1000);
+      return;
+    }
+    if (_termShellInit) { _ts.emit('shell_start');
+      var d = _termFit.proposeDimensions(); if (d) _ts.emit('resize', {rows: d.rows, cols: d.cols}); }
+    fetch('/terminal/api/session/current?limit=' + _tPS).then(function(r) { return r.json(); }).then(function(data) {
+      if (!data.session) { _tSetState('none'); return; }
+      _tDbSid = data.session.id; _tCsSid = data.session.claude_session_id;
+      var nt = data.total_count || 0;
+      if (nt > _tRendered) { _tCollapseAct();
+        var skip = Math.max(0, data.messages.length - (nt - _tRendered));
+        data.messages.slice(skip).forEach(function(m) { _tRenderMsg(m); });
+        _tRendered = nt; _tScrollBot(); }
+      if (data.busy) { _tBackendAlive = true; _tSetState('busy'); if (!_tActCard) _tShowAct(); }
+      else if (_tCsSid) { _tSetState('ready'); } else { _tSetState('none'); }
+    }).catch(function() {});
+  });
+  _ts.on('output', function(data) { if (_termXt) _termXt.write(data); });
+  _ts.on('exit', function() { if (_termXt) { _termXt.write('\r\n\x1b[33m[shell exited — restarting...]\x1b[0m\r\n');
+    setTimeout(function() { _ts.emit('shell_start'); }, 1000); } });
+  _ts.on('disconnect', function() { _tBackendAlive = false; _tSetState('dead'); });
+
+  window.addEventListener('resize', function() {
+    if (_termShellInit && _termSubTab === 'shell') { _termFit.fit();
+      var d = _termFit.proposeDimensions(); if (d) _ts.emit('resize', {rows: d.rows, cols: d.cols}); }
+  });
+
+  // Shell paste
+  document.getElementById('term-shell-paste-btn').addEventListener('click', function() {
+    if (navigator.clipboard && navigator.clipboard.readText)
+      navigator.clipboard.readText().then(function(t) { if (t && _termXt) _termXt.paste(t); }).catch(function(){});
+  });
+
+  // Quick actions
+  var _tqa = document.getElementById('term-quick-actions');
+  document.getElementById('term-qa-toggle').addEventListener('click', function() {
+    _tqa.classList.toggle('collapsed'); _tqa.classList.toggle('expanded');
+    setTimeout(function() { if (_termFit) _termFit.fit(); }, 250);
+  });
+  document.querySelectorAll('.term-qa-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      if (btn.dataset.cmd) {
+        if (!_termShellInit) _termSwitchSub('shell');
+        _ts.emit('input', btn.dataset.cmd + '\n');
+      }
+    });
+  });
+  // Model toggle buttons
+  document.querySelectorAll('.term-model-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var model = btn.dataset.model;
+      var fullModel = model === 'opus' ? 'claude-opus-4-6' : 'claude-sonnet-4-6';
+      fetch('/terminal/api/model', {method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({model: fullModel})}).then(function() {
+        // Highlight active model
+        document.querySelectorAll('.term-model-btn').forEach(function(b) { b.style.background = ''; });
+        btn.style.background = model === 'opus' ? 'rgba(163,113,247,0.15)' : 'rgba(88,166,255,0.15)';
+        showToast('Switched to ' + model.charAt(0).toUpperCase() + model.slice(1), model === 'opus' ? 'purple' : 'blue');
+      }).catch(function() {});
+    });
+  });
+
+  // Markdown renderer
+  function _tMd(text) {
+    var h = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    h = h.replace(/```(\w*)\n([\s\S]*?)```/g, function(_, l, c) { return '<pre><code>' + c.replace(/\n$/, '') + '</code></pre>'; });
+    h = h.replace(/`([^`]+)`/g, '<code>$1</code>');
+    h = h.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    h = h.replace(/\n/g, '<br>');
+    h = h.replace(/<pre><code>([\s\S]*?)<\/code><\/pre>/g, function(_, c) { return '<pre><code>' + c.replace(/<br>/g, '\n') + '</code></pre>'; });
+    return h;
+  }
+
+  // State
+  function _tSetState(state) { _tState = state; _tcd.className = 'claude-dot cdot-' + state; _tUpdateSend(); }
+  function _tUpdateSend() {
+    if (_tState === 'busy') { _tsb.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>';
+      _tsb.classList.add('stop-btn'); _tsb.disabled = false;
+    } else { _tsb.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>';
+      _tsb.classList.remove('stop-btn'); _tsb.disabled = !_tpi.value.trim(); }
+  }
+  function _tScrollBot() { if (_tAutoScroll) _tconv.scrollTop = _tconv.scrollHeight; }
+
+  // Message helpers
+  function _tAddUser(text) { var el = document.createElement('div'); el.className = 'msg msg-user'; el.textContent = text; _tconv.appendChild(el); _tScrollBot(); }
+  function _tAddAsst(text, raw, activity) {
+    var el = document.createElement('div'); el.className = 'msg msg-assistant'; el.innerHTML = _tMd(text);
+    var btn = document.createElement('button'); btn.className = 'copy-btn';
+    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
+    btn.addEventListener('click', function() { navigator.clipboard.writeText(raw || text).then(function() {
+      btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>';
+      btn.classList.add('copied'); setTimeout(function() { btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>'; btn.classList.remove('copied'); }, 1500);
+    }).catch(function(){}); });
+    el.appendChild(btn); _tconv.appendChild(el);
+    if (activity && activity.length > 0) {
+      var toggle = document.createElement('div'); toggle.className = 'activity-collapsed';
+      toggle.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:4px;"><polyline points="9 18 15 12 9 6"/></svg>View activity (' + activity.length + ' steps)';
+      var logEl = document.createElement('div'); logEl.className = 'activity-log'; logEl.textContent = activity.join('\n');
+      toggle.addEventListener('click', function() { var o = logEl.style.display === 'block'; logEl.style.display = o ? 'none' : 'block'; });
+      _tconv.appendChild(toggle); _tconv.appendChild(logEl);
+    }
+    _tScrollBot();
+  }
+  function _tAddErr(text, showRestart) {
+    var el = document.createElement('div'); el.className = 'msg-error'; el.textContent = text;
+    if (showRestart) { var b = document.createElement('button'); b.textContent = 'Restart Session';
+      b.addEventListener('click', function() { _tStartSess(); }); el.appendChild(document.createElement('br')); el.appendChild(b); }
+    _tconv.appendChild(el); _tScrollBot();
+  }
+  function _tShowAct() { _tActLog = []; _tActCard = document.createElement('div'); _tActCard.className = 'activity-card';
+    _tActCard.innerHTML = '<span class="spinner"></span><span class="activity-text">Thinking...</span>';
+    _tconv.appendChild(_tActCard); _tScrollBot(); }
+  function _tUpdateAct(text) { if (!_tActCard) return; _tActLog.push(text);
+    var t = _tActCard.querySelector('.activity-text'); if (t) t.textContent = text; _tScrollBot(); }
+  function _tCollapseAct() { if (!_tActCard) return; var card = _tActCard; _tActCard = null; card.remove();
+    if (_tActLog.length > 0) {
+      var toggle = document.createElement('div'); toggle.className = 'activity-collapsed';
+      toggle.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:4px;"><polyline points="9 18 15 12 9 6"/></svg>View activity (' + _tActLog.length + ' steps)';
+      var logEl = document.createElement('div'); logEl.className = 'activity-log'; logEl.textContent = _tActLog.join('\n');
+      toggle.addEventListener('click', function() { var o = logEl.style.display === 'block'; logEl.style.display = o ? 'none' : 'block'; });
+      _tconv.appendChild(toggle); _tconv.appendChild(logEl);
+    } _tScrollBot(); }
+
+  // Session management
+  function _tStartSess(thenSend) {
+    _tSessionStarting = true; _tBackendAlive = true;
+    _ts.emit('claude_start', {claude_session_id: _tCsSid, db_session_id: _tDbSid});
+    if (thenSend) {
+      var h = function(d) { if (d.state === 'ready') { _ts.off('claude_state', h); _tSessionStarting = false; _tSendPrompt(thenSend); } };
+      _ts.on('claude_state', h);
+      setTimeout(function() { _ts.off('claude_state', h); _tSessionStarting = false; }, 15000);
+    }
+  }
+  function _tSendPrompt(text) { _tAddUser(text); _tRendered++; _tShowAct(); _ts.emit('claude_prompt', {text: text}); }
+  function _tHandleSend() {
+    if (_tState === 'busy') { _ts.emit('claude_stop'); return; }
+    var text = _tpi.value.trim(); if (!text) return;
+    _tpi.value = ''; _tAutoResize(); _tUpdateSend(); _tpi.blur();
+    if (_tState === 'none' || _tState === 'dead' || !_tBackendAlive) _tStartSess(text); else _tSendPrompt(text);
+  }
+  var _tSendFired = false;
+  _tsb.addEventListener('touchstart', function(e) { e.preventDefault(); _tSendFired = true; _tHandleSend(); }, {passive: false});
+  _tsb.addEventListener('click', function() { if (!_tSendFired) _tHandleSend(); _tSendFired = false; });
+  _tpi.addEventListener('keydown', function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); _tHandleSend(); } });
+  _tpi.addEventListener('input', function() { _tAutoResize(); _tUpdateSend(); });
+  function _tAutoResize() { _tpi.style.height = 'auto'; _tpi.style.height = Math.min(_tpi.scrollHeight, window.innerHeight * 0.45) + 'px'; }
+
+  // New session
+  document.getElementById('term-new-session-btn').addEventListener('click', async function() {
+    if (_tState === 'busy' || _tState === 'ready') _ts.emit('claude_stop');
+    try { var r = await fetch('/terminal/api/session/new', {method: 'POST'}); var d = await r.json(); _tDbSid = d.session.id; _tCsSid = null; } catch(e) {}
+    _tSetState('none');
+    var el = document.createElement('div'); el.className = 'session-divider'; el.textContent = '— New Session —'; _tconv.appendChild(el); _tScrollBot();
+  });
+
+  // Paste button
+  document.getElementById('term-claude-paste-btn').addEventListener('click', function() {
+    if (navigator.clipboard && navigator.clipboard.readText)
+      navigator.clipboard.readText().then(function(t) { if (t) { _tpi.value += t; _tAutoResize(); _tUpdateSend(); _tpi.focus(); } }).catch(function(){});
+  });
+
+  // Claude WebSocket events
+  _ts.on('claude_state', function(d) {
+    if (d.state === 'ready') { if (_tState === 'busy') _tCollapseAct(); _tSetState('ready'); }
+    else if (d.state === 'busy') _tSetState('busy');
+    else if (d.state === 'dead') { _tCollapseAct(); _tSetState('dead'); }
+  });
+  _ts.on('claude_status', function(d) {
+    if (d.type === 'restart') { var el = document.createElement('div'); el.className = 'msg-system'; el.textContent = d.text;
+      _tconv.appendChild(el); _tScrollBot(); _tRendered++;
+      if (d.text.indexOf('platform-terminal') !== -1) { _tPendingRestart = true; }
+      if (d.text.indexOf('platform-dashboard') !== -1) {
+        setTimeout(function() { location.reload(); }, 3000);
+      }
+    }
+    _tUpdateAct(d.text);
+  });
+  _ts.on('claude_response', function(d) { _tCollapseAct(); if (d.id) _tCsSid = d.id; _tAddAsst(d.text, d.text); _tRendered++; });
+  _ts.on('claude_error', function(d) { _tCollapseAct(); _tAddErr(d.text + (d.detail ? ': ' + d.detail : ''), true); _tRendered++;
+    if (_tState === 'busy') _tSetState('dead'); });
+  _ts.on('claude_raw', function(d) { _tlc.textContent += d.data; _tlc.scrollTop = _tlc.scrollHeight; });
+
+  // Log clear
+  document.getElementById('term-log-clear-btn').addEventListener('click', function() { _tlc.textContent = ''; });
+
+  // Render DB message (append or prepend)
+  function _tRenderMsg(msg, prepend) {
+    if (msg.role === 'user') {
+      if (prepend) { var el = document.createElement('div'); el.className = 'msg msg-user'; el.textContent = msg.content; _tconv.insertBefore(el, _tconv.firstChild); }
+      else _tAddUser(msg.content);
+    } else if (msg.role === 'assistant') {
+      var act = []; try { act = JSON.parse(msg.activity_log || '[]'); } catch(e) {}
+      if (prepend) { var el = document.createElement('div'); el.className = 'msg msg-assistant'; el.innerHTML = _tMd(msg.content); _tconv.insertBefore(el, _tconv.firstChild); }
+      else _tAddAsst(msg.content, msg.content, act);
+    } else if (msg.role === 'error') {
+      if (prepend) { var el = document.createElement('div'); el.className = 'msg-error'; el.textContent = msg.content; _tconv.insertBefore(el, _tconv.firstChild); }
+      else _tAddErr(msg.content, false);
+    } else if (msg.role === 'system') {
+      var el = document.createElement('div'); el.className = 'msg-system'; el.textContent = msg.content;
+      if (prepend) _tconv.insertBefore(el, _tconv.firstChild); else _tconv.appendChild(el);
+    }
+  }
+
+  // Load session
+  async function _tLoadSession() {
+    try {
+      var r = await fetch('/terminal/api/session/current?limit=' + _tPS);
+      var data = await r.json();
+      if (data.session) {
+        _tDbSid = data.session.id; _tCsSid = data.session.claude_session_id;
+        _tTotal = data.total_count || 0;
+        data.messages.forEach(function(m) { _tRenderMsg(m); });
+        _tRendered = _tTotal;
+        if (data.messages.length > 0) _tOldestId = data.messages[0].id;
+        if (data.busy) { _tBackendAlive = true; _tSetState('busy'); _tShowAct(); }
+        else if (_tCsSid) _tSetState('ready');
+        _tconv.scrollTop = _tconv.scrollHeight;
+        if (_tOldestId) _tLoadOlder();
+      }
+    } catch(e) { console.error('Failed to load terminal session:', e); }
+  }
+
+  // Infinite scroll
+  async function _tLoadOlder() {
+    if (_tLoadingOlder || !_tOldestId || !_tDbSid) return;
+    _tLoadingOlder = true;
+    try {
+      var r = await fetch('/terminal/api/session/current?limit=' + _tPS + '&before_id=' + _tOldestId);
+      var data = await r.json();
+      if (!data.messages || !data.messages.length) { _tOldestId = null; _tLoadingOlder = false; return; }
+      var frag = document.createDocumentFragment();
+      for (var i = 0; i < data.messages.length; i++) {
+        var m = data.messages[i], el;
+        if (m.role === 'user') { el = document.createElement('div'); el.className = 'msg msg-user'; el.textContent = m.content; }
+        else if (m.role === 'assistant') { el = document.createElement('div'); el.className = 'msg msg-assistant'; el.innerHTML = _tMd(m.content); }
+        else if (m.role === 'error') { el = document.createElement('div'); el.className = 'msg-error'; el.textContent = m.content; }
+        else if (m.role === 'system') { el = document.createElement('div'); el.className = 'msg-system'; el.textContent = m.content; }
+        if (el) frag.appendChild(el);
+      }
+      _tOldestId = data.messages[0].id;
+      var ph = _tconv.scrollHeight; _tconv.insertBefore(frag, _tconv.firstChild); _tconv.scrollTop += _tconv.scrollHeight - ph;
+    } catch(e) {}
+    _tLoadingOlder = false;
+  }
+
+  _tconv.addEventListener('scroll', function() {
+    _tAutoScroll = _tconv.scrollTop + _tconv.clientHeight >= _tconv.scrollHeight - 30;
+    if (_tconv.scrollTop < _tconv.clientHeight * 3 && _tOldestId && !_tLoadingOlder) _tLoadOlder();
+  });
+
+  // Keyboard management
+  var _tTabBar = document.querySelector('.tab-bar');
+  var _tInputArea = document.getElementById('term-input-area');
+  var _tCw = document.getElementById('contentWrap');
+  _tpi.addEventListener('focus', function() {
+    _termKeyboardOpen = true;
+    _tTabBar.style.transition = 'none';
+    _tTabBar.style.transform = 'translateY(100%)';
+    _tTabBar.style.opacity = '0';
+    _tTabBar.style.pointerEvents = 'none';
+    _tCw.style.bottom = '0';
+    _tInputArea.style.paddingBottom = '8px';
+    setTimeout(function() { _tconv.scrollTop = _tconv.scrollHeight; }, 300);
+  });
+  _tpi.addEventListener('blur', function() {
+    _termKeyboardOpen = false;
+    // Everything instant, same frame — tab bar, layout, scroll
+    _tTabBar.style.transition = 'none';
+    _tTabBar.style.transform = '';
+    _tTabBar.style.opacity = '';
+    _tTabBar.style.pointerEvents = '';
+    _tCw.style.bottom = '';
+    _tInputArea.style.paddingBottom = '';
+    _adjustContentTop();
+    _tconv.scrollTop = _tconv.scrollHeight;
+  });
+
+  // Dismiss keyboard on tap/drag
+  var _tTouchY = 0, _tTouchEl = null, _tDragDismissed = false;
+  document.addEventListener('touchstart', function(e) { _tTouchY = e.touches[0].clientY; _tTouchEl = e.target; _tDragDismissed = false; }, {passive: true});
+  document.addEventListener('touchmove', function(e) {
+    if (_tDragDismissed || document.activeElement !== _tpi) return;
+    if (!_tTouchEl || !_tTouchEl.closest('#term-input-area')) return;
+    if (e.touches[0].clientY - _tTouchY > 10) { _tDragDismissed = true; _tpi.blur(); }
+  }, {passive: true});
+  document.addEventListener('touchend', function(e) {
+    if (_tDragDismissed || document.activeElement !== _tpi) return;
+    var dy = Math.abs(e.changedTouches[0].clientY - _tTouchY);
+    if (dy < 10 && _tTouchEl && _tTouchEl.closest('#term-conversation') && !_tTouchEl.closest('button') && !_tTouchEl.closest('a')) _tpi.blur();
+  });
+
+  // Visibility handler
+  document.addEventListener('visibilitychange', function() {
+    if (!_termReady || document.visibilityState !== 'visible') return;
+    if (!_ts.connected) { _ts.connect(); } else {
+      fetch('/terminal/api/session/current?limit=' + _tPS).then(function(r) { return r.json(); }).then(function(data) {
+        if (!data.session) { _tSetState('none'); return; }
+        _tDbSid = data.session.id; _tCsSid = data.session.claude_session_id;
+        var nt = data.total_count || 0;
+        if (nt > _tRendered) { _tCollapseAct();
+          var skip = Math.max(0, data.messages.length - (nt - _tRendered));
+          data.messages.slice(skip).forEach(function(m) { _tRenderMsg(m); });
+          _tRendered = nt; _tScrollBot(); }
+        if (data.busy) { _tBackendAlive = true; _tSetState('busy'); if (!_tActCard) _tShowAct(); }
+        else if (_tCsSid) _tSetState('ready'); else _tSetState('none');
+      }).catch(function() {});
+    }
+  });
+
+  // Init
+  _tLoadSession();
+  _tUpdateSend();
+}
+
+// Restore last active tab (hash takes priority over sessionStorage)
+try {
+  var _initTab = null;
+  if (location.hash && location.hash.length > 1) {
+    _initTab = location.hash.substring(1);
+    history.replaceState(null, '', '/');  // clean up the hash
+  }
+  if (!_initTab) {
+    const savedTab = sessionStorage.getItem('_tab');
+    if (savedTab && savedTab !== 'Home') {
+      const _savedRaw = savedTab === 'Bitcoin' ? 'Regimes' : savedTab;
+      _initTab = (_savedRaw === 'Chat' || _savedRaw === 'Arcade') ? null : _savedRaw;
+    }
+  }
+  if (_initTab && document.getElementById('page' + _initTab)) switchTab(_initTab);
 } catch(e) {}
 
 // Dynamic poll rate
@@ -13672,359 +13707,6 @@ async function doTermRestart(btn) {
 
 
 # ═══════════════════════════════════════════════════════════════
-#  EMAIL DEPLOY — IMAP IDLE watches for .py attachments
-# ═══════════════════════════════════════════════════════════════
-
-_email_deploy_conn = None  # Reference to current IMAP connection for recheck
-
-def _start_email_deploy():
-    """Start background thread that watches Gmail via IMAP IDLE for deploy emails."""
-    import imaplib, email as email_mod, shutil, subprocess, threading, time, socket
-    global _email_deploy_conn
-
-    def elog(level, msg):
-        """Log to both stdout and the bot_logs DB table."""
-        print(f"[EmailDeploy] {msg}")
-        try:
-            insert_log(level, f"[EmailDeploy] {msg}", "deploy")
-        except Exception:
-            pass
-
-    def deploy_notify(title, body):
-        """Send push notification with deploy results."""
-        try:
-            from push import send_to_all
-            send_to_all(title, body[:200], tag="deploy", url="/")
-            elog("INFO", f"Push notification sent: {title}")
-        except Exception as e:
-            elog("WARN", f"Push notification failed: {e}")
-
-    imap_user = os.environ.get("DEPLOY_EMAIL", "")
-    imap_pass = os.environ.get("DEPLOY_EMAIL_PASS", "")
-    allowed_senders = [s.strip().lower() for s in os.environ.get("DEPLOY_ALLOWED_SENDERS", "").split(",") if s.strip()]
-
-    if not imap_user or not imap_pass or not allowed_senders:
-        print("[EmailDeploy] Disabled — set DEPLOY_EMAIL, DEPLOY_EMAIL_PASS, DEPLOY_ALLOWED_SENDERS in .env")
-        return
-
-    bot_dir = os.environ.get("BOT_DIR", "/opt/trading-platform")
-    imap_host = os.environ.get("DEPLOY_IMAP_HOST", "imap.gmail.com")
-
-    def deploy_files(attachments):
-        """Deploy .py attachments. Returns (uploaded, errors) lists."""
-        backup_dir = os.path.join(bot_dir, "_backup")
-        os.makedirs(backup_dir, exist_ok=True)
-        uploaded, errors = [], []
-
-        for fname, content in attachments:
-            if not fname.endswith('.py'):
-                elog("WARN", f"Skipping non-.py file: {fname}")
-                errors.append(f"{fname}: not a .py file, skipped")
-                continue
-            try:
-                compile(content, fname, 'exec')
-            except SyntaxError as e:
-                elog("ERROR", f"Syntax error in {fname} line {e.lineno}: {e.msg}")
-                errors.append(f"{fname}: syntax error line {e.lineno}: {e.msg}")
-                continue
-            dest = os.path.join(bot_dir, fname)
-            if os.path.exists(dest):
-                shutil.copy2(dest, os.path.join(backup_dir, fname))
-                elog("INFO", f"Backed up existing {fname}")
-            with open(dest, 'wb') as out:
-                out.write(content)
-            elog("INFO", f"Deployed {fname} ({len(content)} bytes)")
-            uploaded.append(fname)
-
-        if uploaded:
-            with open(os.path.join(backup_dir, "_manifest.json"), "w") as mf:
-                json.dump({"files": uploaded, "ts": now_utc()}, mf)
-
-        return uploaded, errors
-
-    def restart_services(services=None):
-        """Restart services. If services is None, restarts both."""
-        if services is None:
-            services = ["plugin-btc-15m", "platform-dashboard"]
-        results = {}
-        for svc in services:
-            try:
-                r = subprocess.run(["supervisorctl", "restart", svc],
-                                   capture_output=True, text=True, timeout=10)
-                results[svc] = r.stdout.strip() or r.stderr.strip()
-            except Exception as e:
-                results[svc] = str(e)
-        return results
-
-    def run_pip_installs(body_text):
-        """Extract and run pip: lines from email body. Returns list of result strings."""
-        results = []
-        for line in body_text.splitlines():
-            line = line.strip()
-            if line.lower().startswith('pip:'):
-                pkg = line[4:].strip()
-                if not pkg:
-                    continue
-                import re, sys as _sys
-                if not re.match(r'^[a-zA-Z0-9_.>=<!\-\[\],\s]+$', pkg):
-                    elog("WARN", f"pip: rejected invalid package name: {pkg}")
-                    results.append(f"✗ pip: {pkg} — invalid characters")
-                    continue
-                pip_cmd = [_sys.executable, "-m", "pip", "install", pkg, "--break-system-packages"]
-                elog("INFO", f"Running: {' '.join(pip_cmd)}")
-                try:
-                    r = subprocess.run(
-                        pip_cmd,
-                        capture_output=True, text=True, timeout=120
-                    )
-                    stdout_clean = r.stdout.strip()
-                    stderr_clean = r.stderr.strip()
-                    full_output = (stdout_clean + "\n" + stderr_clean).strip()
-                    # Log full output
-                    for ol in full_output.splitlines()[-5:]:
-                        if ol.strip():
-                            elog("INFO", f"  pip: {ol.strip()}")
-                    if r.returncode == 0:
-                        last_lines = [l for l in full_output.splitlines() if l.strip()][-3:]
-                        result_str = f"✓ pip install {pkg}\n  " + "\n  ".join(last_lines)
-                        elog("INFO", f"pip install {pkg} succeeded (exit code 0)")
-                    else:
-                        last_lines = [l for l in full_output.splitlines() if l.strip()][-5:]
-                        result_str = f"✗ pip install {pkg} (exit {r.returncode})\n  " + "\n  ".join(last_lines)
-                        elog("ERROR", f"pip install {pkg} failed (exit code {r.returncode})")
-                    results.append(result_str)
-                except Exception as e:
-                    elog("ERROR", f"pip install {pkg} exception: {e}")
-                    results.append(f"✗ pip install {pkg}: {e}")
-        return results
-
-    def run_service_commands(body_text):
-        """Extract and run service commands from email body. Returns list of result strings."""
-        results = []
-        allowed_services = {"bot": "plugin-btc-15m", "dashboard": "platform-dashboard",
-                           "plugin-btc-15m": "plugin-btc-15m", "platform-dashboard": "platform-dashboard",
-                           "all": None}  # None = apply to all
-        for line in body_text.splitlines():
-            line = line.strip().lower()
-            for prefix in ['restart:', 'start:', 'stop:']:
-                if line.startswith(prefix):
-                    action = prefix[:-1]  # restart, start, stop
-                    target = line[len(prefix):].strip() or 'all'
-                    if target not in allowed_services:
-                        results.append(f"✗ {action}: unknown service '{target}' (use: bot, dashboard, all)")
-                        elog("WARN", f"Unknown service: {target}")
-                        continue
-                    svc_name = allowed_services[target]
-                    targets = [svc_name] if svc_name else ["plugin-btc-15m", "platform-dashboard"]
-                    for svc in targets:
-                        elog("INFO", f"Running: supervisorctl {action} {svc}")
-                        try:
-                            r = subprocess.run(["supervisorctl", action, svc],
-                                             capture_output=True, text=True, timeout=15)
-                            out = (r.stdout.strip() or r.stderr.strip())
-                            results.append(f"✓ {action} {svc}: {out}")
-                            elog("INFO", f"  {svc}: {out}")
-                        except Exception as e:
-                            results.append(f"✗ {action} {svc}: {e}")
-                            elog("ERROR", f"  {svc}: {e}")
-        return results
-
-    def process_email(mail, num):
-        """Process a single email: extract .py attachments, pip commands, deploy, reply."""
-        _, data = mail.fetch(num, '(RFC822)')
-        raw = data[0][1]
-        msg = email_mod.message_from_bytes(raw)
-
-        # Check sender
-        from_raw = msg.get("From", "")
-        from_addr = from_raw
-        if "<" in from_raw:
-            from_addr = from_raw.split("<")[1].split(">")[0]
-        from_addr = from_addr.strip().lower()
-
-        elog("INFO", f"Email received — From: {from_raw!r} → parsed: {from_addr}")
-
-        if from_addr not in allowed_senders:
-            elog("WARN", f"Ignored email from unauthorized sender: {from_addr} (allowed: {allowed_senders})")
-            return
-
-        subj = msg.get("Subject", "")
-        elog("INFO", f"Processing email from {from_addr}: {subj}")
-
-        # Extract body text and .py attachments
-        body_text = ""
-        attachments = []
-        for part in msg.walk():
-            if part.get_content_maintype() == 'multipart':
-                continue
-            fname = part.get_filename()
-            if fname and fname.endswith('.py'):
-                content = part.get_payload(decode=True)
-                if content:
-                    attachments.append((fname, content))
-                    elog("INFO", f"Found attachment: {fname} ({len(content)} bytes)")
-            elif not fname and part.get_content_type() in ('text/plain', 'text/html'):
-                payload = part.get_payload(decode=True)
-                if payload:
-                    decoded = payload.decode(errors='replace')
-                    if '<' in decoded:
-                        import re as _re
-                        decoded = _re.sub(r'<br\s*/?>', '\n', decoded, flags=_re.IGNORECASE)
-                        decoded = _re.sub(r'<[^>]+>', '', decoded)
-                        decoded = decoded.replace('&nbsp;', ' ').replace('&amp;', '&')
-                    body_text += decoded + "\n"
-
-        # Log what we found
-        elog("INFO", f"Email body ({len(body_text)} chars): {body_text[:200].strip()!r}")
-        pip_lines = [l.strip() for l in body_text.splitlines() if l.strip().lower().startswith('pip:')]
-        elog("INFO", f"Email contents: {len(attachments)} .py files, {len(pip_lines)} pip commands")
-        for pl in pip_lines:
-            elog("INFO", f"  Found pip line: {pl}")
-
-        # Check for help request
-        body_lower = body_text.strip().lower()
-        if body_lower in ('help', 'help\n', '?') or body_lower.startswith('help'):
-            if not attachments:
-                elog("INFO", "Help requested")
-                deploy_notify("Email Deploy Help",
-                    "Commands: pip: pkg, restart: all/bot/dashboard, stop: bot, start: bot. "
-                    "Attach .py to deploy. See Settings → Email Deploy.")
-                return
-
-        lines = []
-
-        # Handle service commands from body
-        svc_results = run_service_commands(body_text)
-        if svc_results:
-            lines.append("SERVICE COMMANDS:")
-            for r in svc_results:
-                lines.append(f"  {r}")
-
-        # Handle pip installs from body
-        pip_results = run_pip_installs(body_text)
-        if pip_results:
-            lines.append("\nPIP INSTALLS:" if lines else "PIP INSTALLS:")
-            for r in pip_results:
-                lines.append(f"  {r}")
-
-        # Handle .py deployments
-        if attachments:
-            uploaded, errors = deploy_files(attachments)
-            if uploaded:
-                lines.append("\nDEPLOYED:" if lines else "DEPLOYED:")
-                for f in uploaded:
-                    lines.append(f"  ✓ {f}")
-            if errors:
-                lines.append("\nERRORS:")
-                for e in errors:
-                    lines.append(f"  ✗ {e}")
-
-        if not lines:
-            elog("WARN", "No actions found in email")
-            deploy_notify("Deploy: No Actions", "No .py files, pip commands, or service commands found")
-            return
-
-        # Send push notification BEFORE restart (restart kills this process)
-        parts = []
-        if svc_results: parts.append(f"{len(svc_results)} svc cmd{'s' if len(svc_results)>1 else ''}")
-        if pip_results: parts.append(f"{len(pip_results)} pip")
-        if attachments:
-            ok = len([f for f in lines if '✓' in f])
-            parts.append(f"{ok}/{len(attachments)} files deployed")
-        deploy_notify("Deploy Complete", " | ".join(parts) if parts else "Done")
-        elog("INFO", f"Done: {len(attachments)} files, {len(pip_results)} pip, {len(svc_results)} svc")
-
-        # Restart AFTER notification (if files were deployed)
-        if attachments and uploaded:
-            time.sleep(0.5)  # Let push notification send
-            # If only dashboard-only files deployed, skip bot restart
-            dashboard_only_files = {'dashboard.py'}
-            if all(f in dashboard_only_files for f in uploaded):
-                elog("INFO", "Dashboard-only deploy — skipping bot restart")
-                results = restart_services(["platform-dashboard"])
-            else:
-                results = restart_services()
-            for svc, r in results.items():
-                elog("INFO", f"Restart: {svc}: {r}")
-
-    def idle_loop():
-        """Main IMAP IDLE loop — reconnects on failure."""
-        global _email_deploy_conn
-        while True:
-            mail = None
-            try:
-                elog("DEBUG", f"Connecting to {imap_host}...")
-                mail = imaplib.IMAP4_SSL(imap_host, timeout=30)
-                mail.login(imap_user, imap_pass)
-                mail.select("INBOX")
-                _email_deploy_conn = mail
-                elog("DEBUG", "Connected. Watching for deploy emails...")
-
-                while True:
-                    # Check for unread emails
-                    _, nums = mail.search(None, 'UNSEEN')
-                    unread = [n for n in nums[0].split() if n]
-                    if unread:
-                        elog("INFO", f"Found {len(unread)} unread email(s)")
-                    for num in unread:
-                        try:
-                            process_email(mail, num)
-                            mail.store(num, '+FLAGS', '\\Seen')
-                        except Exception as e:
-                            elog("ERROR", f"Error processing email: {e}")
-
-                    # IDLE — wait for new mail
-                    tag = mail._new_tag()
-                    mail.send(tag + b' IDLE\r\n')
-                    # Read the continuation "+" response
-                    mail.readline()
-
-                    # Block waiting for server notification (25 min max per RFC)
-                    mail.sock.settimeout(25 * 60)
-                    got_mail = False
-                    try:
-                        while True:
-                            line = mail.readline().decode(errors='replace')
-                            if not line:
-                                # Empty read = connection dropped by server
-                                elog("DEBUG", "IDLE: empty readline — connection lost")
-                                raise OSError("IDLE connection dropped")
-                            if 'EXISTS' in line or 'RECENT' in line:
-                                got_mail = True
-                                break
-                    except (socket.timeout, OSError):
-                        pass  # Timeout or disconnect — re-IDLE
-
-                    # End IDLE
-                    mail.send(b'DONE\r\n')
-                    # Consume the tagged OK response
-                    try:
-                        mail.readline()
-                    except Exception:
-                        pass
-
-                    # Reset socket timeout for normal commands
-                    mail.sock.settimeout(30)
-
-            except Exception as e:
-                elog("DEBUG", f"Connection error: {e}")
-            finally:
-                _email_deploy_conn = None
-                try:
-                    if mail:
-                        mail.logout()
-                except Exception:
-                    pass
-
-            elog("DEBUG", "Reconnecting in 10s...")
-            time.sleep(10)
-
-    thread = threading.Thread(target=idle_loop, daemon=True, name="email-deploy")
-    thread.start()
-    elog("INFO", f"Started — watching {imap_user} for emails from {', '.join(allowed_senders)}")
-
-
-# ═══════════════════════════════════════════════════════════════
 #  HEALTH CHECK
 # ═══════════════════════════════════════════════════════════════
 
@@ -14252,7 +13934,6 @@ def main():
     # Migration not needed — fresh schema
     _fix_supervisor_config()
     _install_watchdog_cron()
-    _start_email_deploy()
     _start_health_check()
     print(f"Dashboard starting on {DASHBOARD_HOST}:{DASHBOARD_PORT}")
     app.run(host=DASHBOARD_HOST, port=DASHBOARD_PORT, debug=False)
