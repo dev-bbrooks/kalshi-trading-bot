@@ -6214,9 +6214,10 @@ function openDevSidebar() {
   document.getElementById('devSidebar').classList.add('open');
   document.getElementById('devSidebarOverlay').classList.add('open');
   document.body.classList.add('dev-sidebar-open');
-  // Highlight current panel in nav
+  // Highlight current panel in nav — only if dev panels are actually visible
+  var devPanelsActive = document.getElementById('devPanels').classList.contains('active');
   document.querySelectorAll('.dev-sidebar-item').forEach(function(item) {
-    item.classList.toggle('active', item.dataset.panel === _devLastPanel);
+    item.classList.toggle('active', devPanelsActive && item.dataset.panel === _devLastPanel);
   });
   var dot = document.getElementById('devSidebar-claude-dot');
   if (dot) dot.className = 'claude-dot cdot-' + (_tState || 'none');
