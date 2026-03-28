@@ -4043,7 +4043,8 @@ MAIN_HTML = r"""<!-- v2-bottom-fix -->
          font-size: 14px; margin: 0; padding: 0; }
   #sidebar {
     position: fixed; top: 0; left: 0; height: 100%; width: 260px;
-    background: var(--card); border-right: 1px solid var(--border);
+    background: rgba(13, 17, 23, 0.5); -webkit-backdrop-filter: blur(20px) saturate(1.5); backdrop-filter: blur(20px) saturate(1.5);
+    border-right: 1px solid var(--border);
     z-index: 1000; transform: translateX(-260px);
     transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     display: flex; flex-direction: column; overflow-y: auto;
@@ -4052,15 +4053,12 @@ MAIN_HTML = r"""<!-- v2-bottom-fix -->
   }
   #sidebar.open { transform: translateX(0); }
   #sidebarOverlay {
-    position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+    position: fixed; inset: 0; background: rgba(0,0,0,0.3);
     z-index: 999; opacity: 0; pointer-events: none;
     transition: opacity 0.3s ease;
   }
   #sidebarOverlay.open { opacity: 1; pointer-events: auto; }
-  body.sidebar-open #contentWrap,
-  body.sidebar-open .bot-offline-banner {
-    transform: translateX(260px);
-  }
+  body.sidebar-open #contentWrap { pointer-events: none; }
   .sidebar-item {
     display: flex; align-items: center; gap: 12px;
     padding: 12px 20px; color: var(--dim); font-size: 14px;
@@ -4070,7 +4068,7 @@ MAIN_HTML = r"""<!-- v2-bottom-fix -->
     -webkit-tap-highlight-color: transparent;
   }
   .sidebar-item:active { background: rgba(255,255,255,0.05); }
-  .sidebar-item.active {
+  #sidebar.open .sidebar-item.active {
     color: var(--blue); border-left-color: var(--blue);
     background: rgba(56,139,253,0.08);
   }
@@ -4639,8 +4637,35 @@ MAIN_HTML = r"""<!-- v2-bottom-fix -->
   .term-panel { position: absolute; inset: 0; display: none; flex-direction: column; }
   .term-panel.active { display: flex; }
   #term-claude-panel { background: var(--bg); }
+  #term-claude-header {
+    position: absolute; top: 0; left: 0; right: 0; z-index: 10;
+    padding: 14px 16px; padding-top: calc(14px + env(safe-area-inset-top, 0px));
+    display: flex; align-items: center; gap: 10px;
+    pointer-events: none;
+    background: transparent;
+  }
+  #term-claude-header > * { pointer-events: auto; }
+  #term-claude-header .tch-title {
+    font-size: 15px; font-weight: 600; color: var(--text);
+    background: rgba(13, 17, 23, 0.5); -webkit-backdrop-filter: blur(20px) saturate(1.5); backdrop-filter: blur(20px) saturate(1.5);
+    padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border);
+    box-shadow: 0 2px 12px rgba(0,0,0,0.5);
+    display: flex; align-items: center; gap: 8px;
+  }
+  #term-claude-header .tch-model {
+    font-size: 11px; color: var(--dim); font-weight: 400;
+  }
+  #term-claude-new-btn {
+    width: 36px; height: 36px; border-radius: 8px; border: 1px solid var(--border);
+    background: rgba(13, 17, 23, 0.5); -webkit-backdrop-filter: blur(20px) saturate(1.5); backdrop-filter: blur(20px) saturate(1.5);
+    color: var(--dim); cursor: pointer; margin-left: auto;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.5);
+    -webkit-tap-highlight-color: transparent;
+  }
+  #term-claude-new-btn:active { background: var(--card); }
   #term-conversation {
-    flex: 1; overflow-y: auto; padding: 12px; padding-bottom: 110px; -webkit-overflow-scrolling: touch;
+    flex: 1; overflow-y: auto; padding: 12px; padding-top: 64px; padding-bottom: 110px; -webkit-overflow-scrolling: touch;
     display: flex; flex-direction: column; gap: 12px;
   }
   #term-conversation .msg, #term-shell-output .msg { max-width: 88%; padding: 10px 14px; border-radius: 16px; font-size: 15px;
@@ -4814,14 +4839,14 @@ MAIN_HTML = r"""<!-- v2-bottom-fix -->
 
   /* ── Right Dev Sidebar ── */
   #devSidebarOverlay {
-    position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+    position: fixed; inset: 0; background: rgba(0,0,0,0.3);
     z-index: 1099; opacity: 0; pointer-events: none;
     transition: opacity 0.3s ease;
   }
   #devSidebarOverlay.open { opacity: 1; pointer-events: auto; }
   #devSidebar {
-    position: fixed; top: 0; right: 0; bottom: 0; width: 88vw; max-width: 480px;
-    background: var(--bg); z-index: 1100;
+    position: fixed; top: 0; right: 0; bottom: 0; width: 260px;
+    background: rgba(13, 17, 23, 0.5); -webkit-backdrop-filter: blur(20px) saturate(1.5); backdrop-filter: blur(20px) saturate(1.5); z-index: 1100;
     transform: translateX(100%);
     transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     display: flex; flex-direction: column; overflow: hidden;
@@ -4832,7 +4857,7 @@ MAIN_HTML = r"""<!-- v2-bottom-fix -->
     flex-shrink: 0; padding: 16px 20px;
     padding-top: calc(16px + env(safe-area-inset-top, 0px));
     display: flex; align-items: center; justify-content: space-between;
-    background: var(--card); border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
     min-height: 48px;
   }
   #devSidebar-new-btn {
@@ -4852,14 +4877,18 @@ MAIN_HTML = r"""<!-- v2-bottom-fix -->
     -webkit-tap-highlight-color: transparent;
   }
   .dev-sidebar-item:active { background: rgba(255,255,255,0.05); }
-  .dev-sidebar-item.active {
+  #devSidebar.open .dev-sidebar-item.active {
     color: var(--blue); border-left-color: var(--blue);
     background: rgba(56,139,253,0.08);
   }
   .dev-sidebar-item svg { width: 18px; height: 18px; flex-shrink: 0; }
-  #devSidebar-content {
-    flex: 1; min-height: 0; position: relative; overflow: hidden;
+  #devPanels {
+    position: fixed; inset: 0; z-index: 50;
+    background: var(--bg);
+    display: none; flex-direction: column;
   }
+  #devPanels.active { display: flex; }
+  #devPanels-wrap { flex: 1; min-height: 0; position: relative; }
 
 </style>
 </head>
@@ -5892,12 +5921,9 @@ MAIN_HTML = r"""<!-- v2-bottom-fix -->
 <div id="devSidebar">
   <div id="devSidebar-header">
     <span style="font-size:15px;font-weight:600;color:var(--text)">Developer Tools</span>
-    <button id="devSidebar-new-btn" title="New Session" style="display:none">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-    </button>
   </div>
   <div id="devSidebar-nav">
-    <div class="dev-sidebar-item active" data-panel="claude" onclick="devSidebarNav('claude')">
+    <div class="dev-sidebar-item" data-panel="claude" onclick="devSidebarNav('claude')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
       <span>Claude Code</span>
       <span id="devSidebar-claude-dot" class="claude-dot cdot-none" style="margin-left:auto"></span>
@@ -5915,8 +5941,18 @@ MAIN_HTML = r"""<!-- v2-bottom-fix -->
       <span>Options</span>
     </div>
   </div>
-  <div id="devSidebar-content">
+  </div>
+</div>
+<div id="devPanels">
+  <div id="devPanels-wrap">
       <div id="term-claude-panel" class="term-panel">
+        <div id="term-claude-header">
+          <div class="tch-title">
+            <span class="claude-dot cdot-none" id="term-claude-hdr-dot"></span>
+            Claude Code
+            <span class="tch-model" id="term-claude-hdr-model">Sonnet</span>
+          </div>
+        </div>
         <div id="term-conversation"></div>
         <div id="term-input-area">
           <button id="term-claude-paste-btn" title="Paste"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M12 11v6"/><path d="M9 14l3 3 3-3"/></svg></button>
@@ -6172,37 +6208,43 @@ var _tState = 'none';
     }
   }, {passive: true});
 })();
-function openDevSidebar(panel) {
+function openDevSidebar() {
   closeSidebar();
-  panel = panel || _devLastPanel || 'claude';
-  _devLastPanel = panel;
   _devSidebarOpen = true;
-  try { _termInit(); } catch(e) { console.error('Terminal init error:', e); }
   document.getElementById('devSidebar').classList.add('open');
   document.getElementById('devSidebarOverlay').classList.add('open');
   document.body.classList.add('dev-sidebar-open');
-  devSidebarNav(panel);
+  // Highlight current panel in nav
+  document.querySelectorAll('.dev-sidebar-item').forEach(function(item) {
+    item.classList.toggle('active', item.dataset.panel === _devLastPanel);
+  });
+  var dot = document.getElementById('devSidebar-claude-dot');
+  if (dot) dot.className = 'claude-dot cdot-' + (_tState || 'none');
+  var newBtn = document.getElementById('devSidebar-new-btn');
+  if (newBtn) newBtn.style.display = _devLastPanel === 'claude' ? 'flex' : 'none';
 }
 function closeDevSidebar() {
   _devSidebarOpen = false;
   document.getElementById('devSidebar').classList.remove('open');
   document.getElementById('devSidebarOverlay').classList.remove('open');
   document.body.classList.remove('dev-sidebar-open');
-  if (typeof _claudeScroller !== 'undefined' && _claudeScroller) _claudeScroller.setActive(false);
-  if (typeof _shellScroller !== 'undefined' && _shellScroller) _shellScroller.setActive(false);
 }
 function devSidebarNav(panel) {
   _devLastPanel = panel;
-  document.querySelectorAll('.dev-sidebar-item').forEach(function(item) {
-    item.classList.toggle('active', item.dataset.panel === panel);
-  });
-  var newBtn = document.getElementById('devSidebar-new-btn');
-  if (newBtn) newBtn.style.display = panel === 'claude' ? 'flex' : 'none';
-  var dot = document.getElementById('devSidebar-claude-dot');
-  if (dot) dot.className = 'claude-dot cdot-' + (_tState || 'none');
-  document.querySelectorAll('#devSidebar .term-panel').forEach(function(p) { p.classList.remove('active'); });
+  // Close the sidebar (same as left sidebar pattern)
+  closeDevSidebar();
+  // Clear left sidebar highlighting when switching to a dev panel
+  document.querySelectorAll('.sidebar-item').forEach(function(item) { item.classList.remove('active'); });
+  // Initialize terminal if needed
+  try { _termInit(); } catch(e) { console.error('Terminal init error:', e); }
+  // Show the dev panels container
+  var container = document.getElementById('devPanels');
+  container.classList.add('active');
+  // Switch to the right panel
+  document.querySelectorAll('#devPanels .term-panel').forEach(function(p) { p.classList.remove('active'); });
   var target = document.getElementById('term-' + panel + '-panel');
   if (target) target.classList.add('active');
+  // Activate scrollers
   if (window._devNavActivate) window._devNavActivate(panel);
 }
 let currentBankroll = 0;
@@ -12803,6 +12845,8 @@ let _currentTab = 'Home';
 function switchTab(tab) {
   // Close any open modals
   closeAllModals();
+  // Hide dev panels when switching to a regular page
+  document.getElementById('devPanels').classList.remove('active');
 
   // Teardown previous tab
 
@@ -12817,6 +12861,8 @@ function switchTab(tab) {
   document.querySelectorAll('.sidebar-item').forEach(function(item) {
     item.classList.toggle('active', item.dataset.tab === tab);
   });
+  // Clear right sidebar highlighting when switching to a regular page
+  document.querySelectorAll('.dev-sidebar-item').forEach(function(item) { item.classList.remove('active'); });
 
   // Reset scroll/layout for page switches
   document.body.style.overscrollBehavior = '';
@@ -13314,6 +13360,8 @@ function _termInit() {
     sonnetBtn.className = 'options-model-btn' + (isSonnet ? ' model-active' : '');
     opusBtn.className = 'options-model-btn' + (!isSonnet ? ' model-active-opus' : '');
     document.getElementById('term-opt-model-hint').textContent = 'Current: ' + _tModelDisplay + (isSonnet ? ' (default)' : '');
+    var hdrModel = document.getElementById('term-claude-hdr-model');
+    if (hdrModel) hdrModel.textContent = _tModelDisplay;
   }
   fetch('/terminal/api/model', {credentials: 'same-origin'}).then(function(r) { return r.json(); }).then(function(d) {
     _termUpdateModelUI(d.model);
@@ -13346,6 +13394,8 @@ function _termInit() {
     _tState = state;
     var devDot = document.getElementById('devSidebar-claude-dot');
     if (devDot) devDot.className = 'claude-dot cdot-' + state;
+    var hdrDot = document.getElementById('term-claude-hdr-dot');
+    if (hdrDot) hdrDot.className = 'claude-dot cdot-' + state;
     _claudeScroller.updateSendBtn();
   }
   function _tScrollBot() { _claudeScroller.scrollToBottom(); }
@@ -13543,18 +13593,6 @@ function _termInit() {
     }
   };
 
-  // Dev sidebar new session button
-  var _devNewBtn = document.getElementById('devSidebar-new-btn');
-  if (_devNewBtn) {
-    _devNewBtn.addEventListener('click', async function() {
-      if (_tState === 'busy' || _tState === 'ready') _ts.emit('claude_stop');
-      _tCsSid = null; _tBackendAlive = false;
-      try { var r = await fetch('/terminal/api/session/new', {method: 'POST'}); if (r.ok) { var d = await r.json(); if (d.session) _tDbSid = d.session.id; } } catch(e) {}
-      _tSetState('none');
-      var el = document.createElement('div'); el.className = 'session-divider'; el.textContent = '— New Session —'; _tconv.appendChild(el); _tScrollBot();
-    });
-  }
-
   // Init
   _tLoadSession();
   _claudeScroller.updateSendBtn();
@@ -13575,7 +13613,7 @@ try {
     }
   }
   if (_initTab) {
-    if (_initTab === 'Terminal') openDevSidebar();
+    if (_initTab === 'Terminal') devSidebarNav(_devLastPanel);
     else if (document.getElementById('page' + _initTab)) switchTab(_initTab);
   }
 } catch(e) {}
