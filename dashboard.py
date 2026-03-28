@@ -88,6 +88,7 @@ def get_regime_worker_status() -> dict:
 
 app = Flask(__name__)
 
+
 # ═══════════════════════════════════════════════════════════════
 #  SECURITY: Rate limiting, CSRF, Destruction PIN
 # ═══════════════════════════════════════════════════════════════
@@ -4017,14 +4018,15 @@ def logs_page():
 #  HTML TEMPLATES
 # ═══════════════════════════════════════════════════════════════
 
-MAIN_HTML = r"""<!DOCTYPE html>
+MAIN_HTML = r"""<!-- v2-bottom-fix -->
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <link rel="manifest" href="/manifest.json">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="theme-color" content="#0d1117">
 <link rel="apple-touch-icon" href="/icon-192.png">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css">
@@ -4032,7 +4034,8 @@ MAIN_HTML = r"""<!DOCTYPE html>
 <style>
   :root { --bg: #0d1117; --card: #161b22; --border: #30363d; --text: #c9d1d9;
           --green: #3fb950; --red: #f85149; --yellow: #d29922; --blue: #58a6ff;
-          --dim: #8b949e; --orange: #f0883e; }
+          --dim: #8b949e; --orange: #f0883e;
+          }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { overflow: hidden; position: fixed; width: 100%; height: 100%; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -4058,10 +4061,6 @@ MAIN_HTML = r"""<!DOCTYPE html>
   body.sidebar-open .bot-offline-banner {
     transform: translateX(260px);
   }
-  body.sidebar-open #safeAreaTop,
-  body.sidebar-open #safeAreaBottom {
-    transform: translateX(260px);
-  }
   .sidebar-item {
     display: flex; align-items: center; gap: 12px;
     padding: 12px 20px; color: var(--dim); font-size: 14px;
@@ -4080,33 +4079,15 @@ MAIN_HTML = r"""<!DOCTYPE html>
     padding: 16px 20px 8px; font-size: 10px; font-weight: 600;
     color: var(--dim); letter-spacing: 0.5px; text-transform: uppercase;
   }
-  #contentWrap { position: fixed; top: 0; left: 0; right: 0; bottom: env(safe-area-inset-bottom, 0px);
+  #contentWrap { position: fixed; top: 0; left: 0; right: 0; bottom: 0;
     overflow-y: auto; overscroll-behavior-y: contain;
-    -webkit-overflow-scrolling: touch; padding: calc(env(safe-area-inset-top, 0px) + 8px) 12px calc(env(safe-area-inset-bottom, 0px) + 8px) 12px;
+    -webkit-overflow-scrolling: touch; padding: 8px 12px;
     transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
-  #safeAreaTop {
-    position: fixed; top: 0; left: 0; right: 0;
-    height: calc(env(safe-area-inset-top, 0px) + 8px);
-    -webkit-backdrop-filter: blur(12px) saturate(1.5);
-    backdrop-filter: blur(12px) saturate(1.5);
-    -webkit-mask-image: linear-gradient(to bottom, black 50%, transparent);
-    mask-image: linear-gradient(to bottom, black 50%, transparent);
-    background: linear-gradient(to bottom, rgba(13,17,23,0.7), transparent);
-    pointer-events: none;
-    z-index: 40;
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-  #safeAreaBottom {
-    position: fixed; bottom: 0; left: 0; right: 0;
-    height: calc(env(safe-area-inset-bottom, 0px) + 16px);
-    -webkit-backdrop-filter: blur(12px) saturate(1.5);
-    backdrop-filter: blur(12px) saturate(1.5);
-    -webkit-mask-image: linear-gradient(to top, black 40%, transparent);
-    mask-image: linear-gradient(to top, black 40%, transparent);
-    background: linear-gradient(to top, rgba(13,17,23,0.7), transparent);
-    pointer-events: none;
-    z-index: 40;
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  #contentWrap.terminal-active {
+    padding: 0 !important;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
   }
   .hdr-row { display: flex; justify-content: space-between; align-items: center; }
   #hdrBankroll:active { background: rgba(255,255,255,0.08); }
@@ -4345,7 +4326,7 @@ MAIN_HTML = r"""<!DOCTYPE html>
     margin:12px auto;cursor:grab;flex-shrink:0; }
   #filterSheetScroll { overflow-y:auto;flex:1;min-height:0;padding:0 16px;-webkit-overflow-scrolling:touch;
     overscroll-behavior:contain; }
-  #filterSheetFooter { flex-shrink:0;padding:12px 16px max(12px, env(safe-area-inset-bottom)) 16px;border-top:1px solid var(--border);
+  #filterSheetFooter { flex-shrink:0;padding:12px 16px;border-top:1px solid var(--border);
     background:var(--card);border-radius:0 0 0 0; }
   .fs-below-fold { transition:opacity 200ms; }
   .fs-gradient { position:absolute;bottom:0;left:0;right:0;height:40px;
@@ -4761,7 +4742,7 @@ MAIN_HTML = r"""<!DOCTYPE html>
     border-top: 1px solid var(--border); margin-top: 4px;
   }
   #term-input-area {
-    padding: 8px 12px calc(env(safe-area-inset-bottom, 0px) + 8px);
+    padding: 8px 12px 30px 12px;
     background: var(--card); border-top: 1px solid var(--border); display: flex; gap: 8px;
     align-items: flex-end; flex-shrink: 0;
   }
@@ -4812,7 +4793,7 @@ MAIN_HTML = r"""<!DOCTYPE html>
     background: var(--bg);
   }
   #term-shell-input-area {
-    padding: 8px 12px calc(env(safe-area-inset-bottom, 0px) + 8px); background: var(--card); border-top: 1px solid var(--border);
+    padding: 8px 12px 30px 12px; background: var(--card); border-top: 1px solid var(--border);
     display: flex; gap: 8px; align-items: flex-end; flex-shrink: 0;
   }
   #term-shell-input {
@@ -4858,12 +4839,10 @@ MAIN_HTML = r"""<!DOCTYPE html>
 
 <!-- Sidebar Overlay -->
 <div id="sidebarOverlay" onclick="closeSidebar()"></div>
-<div id="safeAreaTop"></div>
-<div id="safeAreaBottom"></div>
 
 <!-- Sidebar Navigation -->
 <div id="sidebar">
-  <div style="padding:calc(env(safe-area-inset-top, 0px) + 16px) 20px 16px 20px;border-bottom:1px solid var(--border);min-height:48px;display:flex;align-items:center;justify-content:space-between">
+  <div style="padding:16px 20px;border-bottom:1px solid var(--border);min-height:48px;display:flex;align-items:center;justify-content:space-between">
     <span style="font-size:15px;font-weight:600;color:var(--text)">Observatory</span>
     <button id="sidebarRefreshBtn" style="background:none;border:1px solid var(--border);border-radius:8px;width:34px;height:34px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--dim);-webkit-tap-highlight-color:transparent" onclick="sidebarRefresh()">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
@@ -6018,6 +5997,7 @@ const $ = s => document.querySelector(s);
 function _cw() { return document.getElementById('contentWrap'); }
 function scrollTop() { const c = _cw(); if (c) c.scrollTop = 0; }
 function scrollBottom() { const c = _cw(); if (c) c.scrollTop = c.scrollHeight; }
+
 
 // Format P&L with sign before $: +$5.00 or -$5.00
 function fmtPnl(val) {
@@ -12817,21 +12797,13 @@ function switchTab(tab) {
   // Terminal needs flex layout; other tabs need normal scroll
   const cw = document.getElementById('contentWrap');
   if (tab === 'Terminal') {
-    cw.style.overflow = 'hidden';
-    cw.style.padding = '0';
-    cw.style.display = 'flex';
-    cw.style.flexDirection = 'column';
-    cw.style.overscrollBehavior = 'none';
+    cw.classList.add('terminal-active');
     document.body.style.overscrollBehavior = 'none';
     document.body.style.background = '#161b22';
     document.querySelector('meta[name="theme-color"]').content = '#161b22';
   } else {
-    cw.style.overflow = '';
-    cw.style.padding = '';
-    cw.style.overscrollBehavior = '';
+    cw.classList.remove('terminal-active');
     document.body.style.overscrollBehavior = '';
-    cw.style.display = '';
-    cw.style.flexDirection = '';
     document.body.style.background = '';
     document.querySelector('meta[name="theme-color"]').content = '#0d1117';
     scrollTop();
