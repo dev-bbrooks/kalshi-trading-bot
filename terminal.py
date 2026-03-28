@@ -233,6 +233,17 @@ def api_session_new():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/terminal/api/enhancer", methods=["GET", "POST"])
+def api_enhancer():
+    if not _is_authenticated():
+        return jsonify({"error": "unauthorized"}), 401
+    if request.method == "POST":
+        data = request.get_json() or {}
+        if "enabled" in data:
+            _enhancer_config["enabled"] = bool(data["enabled"])
+    return jsonify({"enabled": _enhancer_config["enabled"]})
+
+
 # ── WebSocket handlers ────────────────────────────────────────
 
 @socketio.on("connect", namespace="/terminal/ws")
@@ -349,6 +360,83 @@ def _find_claude():
 # Configurable model — can be changed at runtime via API
 _claude_model = {"model": None}  # None = use default
 
+# Prompt enhancer config
+_enhancer_config = {
+    "enabled": True,
+    "timeout": 30,  # seconds — kill enhancer if it takes too long
+    "max_context_messages": 5,  # recent user messages to include
+}
+
+_CLAUDE_MD_PATH = "/opt/trading-platform/CLAUDE.md"
+
+def _read_claude_md():
+    """Read CLAUDE.md from disk each time (always current)."""
+    try:
+        with open(_CLAUDE_MD_PATH, "r") as f:
+            return f.read()
+    except Exception:
+        return "(CLAUDE.md not available)"
+
+
+def _get_recent_user_messages(db_session_id, limit=5):
+    """Get the last N user messages from the current terminal session for context."""
+    if not db_session_id:
+        return []
+    try:
+        with get_conn() as c:
+            rows = c.execute(
+                "SELECT content FROM terminal_messages WHERE session_id = ? AND role = 'user' ORDER BY id DESC LIMIT ?",
+                (db_session_id, limit)
+            ).fetchall()
+            return [r[0] for r in reversed(rows)]  # chronological order
+    except Exception:
+        return []
+
+
+def _build_enhancer_prompt(user_text, recent_messages, claude_md_content):
+    """Build the full prompt for the enhancer instance."""
+
+    recent_context = ""
+    if recent_messages:
+        recent_context = "RECENT USER MESSAGES (oldest to newest, for understanding references like 'it', 'that', 'more', etc.):\n"
+        for i, msg in enumerate(recent_messages, 1):
+            recent_context += f"{i}. {msg}\n"
+        recent_context += "\n"
+
+    return f"""[PROMPT ENHANCER MODE]
+
+You are a prompt enhancer for a Claude Code terminal on a Kalshi BTC trading platform. A developer will send you their raw message. Your job is to decide what to do with it and respond with EXACTLY ONE of the following — nothing else, no extra text, no explanation:
+
+OPTION 1 — ENHANCE: If the message is a substantial code request (new feature, bug fix, refactoring, adding/modifying endpoints, UI changes, config changes, debugging, etc.), create a detailed structured prompt and wrap it in tags:
+<ENHANCED_PROMPT>
+[Your detailed prompt here]
+</ENHANCED_PROMPT>
+
+OPTION 2 — PASSTHROUGH: If the message is any of these, output ONLY this tag:
+<PASSTHROUGH/>
+- Conversational (greetings, "how's it going", status questions, "what did you change")
+- A short iterative follow-up where the existing session context is sufficient ("make it bigger", "increase it more", "try 20px", "change the color to blue", "add a border too")
+- A direct instruction that's already specific enough ("change X to Y in file Z")
+- Anything you're uncertain about — when in doubt, passthrough
+
+RULES FOR ENHANCED PROMPTS:
+- Start with a clear one-line summary of the task
+- List which files to read first (use full paths under /opt/trading-platform/)
+- Write a numbered step-by-step plan
+- Include verification steps: `python3 -m py_compile <file>` for every modified .py file
+- If the change affects dashboard.py, terminal.py, bot.py, or strategy.py, mention which services need restarting and include the supervisorctl restart line (the auto-restart system handles execution)
+- Reference relevant project conventions from the CLAUDE.md context below
+- Do NOT include the CLAUDE.md content itself in the enhanced prompt — Claude Code already has it. Just reference specific rules when relevant.
+- Keep the enhanced prompt focused and actionable — not a lecture, a work order
+
+PROJECT CONTEXT (CLAUDE.md):
+---
+{claude_md_content}
+---
+
+{recent_context}DEVELOPER'S CURRENT MESSAGE:
+{user_text}"""
+
 # Pre-resolve claude-worker UID/GID at import time
 try:
     _CW = pwd.getpwnam("claude-worker")
@@ -368,6 +456,116 @@ class ClaudeCodeSession:
         self.prompt_count = 0
         self.services_to_restart = set()
         self.current_activities = []  # Accumulates during a task
+
+    def _run_enhancer(self, user_text):
+        """Run the enhancer instance. Returns (enhanced_text, was_enhanced) or (original_text, False) on any failure."""
+        import time as _time
+        try:
+            recent_msgs = _get_recent_user_messages(self.db_session_id, _enhancer_config["max_context_messages"])
+            claude_md = _read_claude_md()
+            enhancer_prompt = _build_enhancer_prompt(user_text, recent_msgs, claude_md)
+
+            claude_path = _find_claude()
+            if not claude_path:
+                return user_text, False
+
+            cmd = [claude_path, "-p", enhancer_prompt,
+                   "--dangerously-skip-permissions",
+                   "--output-format", "stream-json", "--verbose"]
+
+            if _claude_model["model"]:
+                cmd.extend(["--model", _claude_model["model"]])
+
+            # NO --resume — always a fresh throwaway instance
+            env = os.environ.copy()
+            env.pop("ANTHROPIC_API_KEY", None)
+            if _CW:
+                env["HOME"] = _CW.pw_dir
+                env["USER"] = "claude-worker"
+
+            def _preexec():
+                if _CW:
+                    os.setgid(_CW.pw_gid)
+                    os.setuid(_CW.pw_uid)
+
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                stdin=subprocess.DEVNULL,
+                cwd="/opt/trading-platform",
+                env=env,
+                preexec_fn=_preexec,
+            )
+
+            print(f"[enhancer] Spawned pid={proc.pid}", flush=True)
+
+            # Read output with timeout
+            response_text = ""
+            start_time = _time.time()
+
+            def _blocking_readline():
+                return proc.stdout.readline()
+
+            while True:
+                if _time.time() - start_time > _enhancer_config["timeout"]:
+                    print("[enhancer] Timeout — killing", flush=True)
+                    proc.kill()
+                    proc.wait()
+                    return user_text, False
+
+                try:
+                    raw_line = eventlet.tpool.execute(_blocking_readline)
+                except Exception:
+                    break
+
+                if not raw_line:
+                    break
+
+                line = raw_line.decode("utf-8", errors="replace").strip()
+                if not line:
+                    continue
+
+                try:
+                    msg = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                msg_type = msg.get("type", "")
+
+                if msg_type == "assistant":
+                    content = msg.get("message", {}).get("content", [])
+                    for block in content:
+                        if block.get("type") == "text":
+                            response_text = block["text"]
+
+                elif msg_type == "result":
+                    result_text = msg.get("result", "")
+                    if result_text:
+                        response_text = result_text
+
+            proc.wait()
+
+            # Parse the response
+            if "<PASSTHROUGH/>" in response_text:
+                print(f"[enhancer] Passthrough", flush=True)
+                return user_text, False
+
+            if "<ENHANCED_PROMPT>" in response_text and "</ENHANCED_PROMPT>" in response_text:
+                start = response_text.index("<ENHANCED_PROMPT>") + len("<ENHANCED_PROMPT>")
+                end = response_text.index("</ENHANCED_PROMPT>")
+                enhanced = response_text[start:end].strip()
+                if enhanced:
+                    print(f"[enhancer] Enhanced ({len(enhanced)} chars)", flush=True)
+                    return enhanced, True
+
+            # Unexpected output — fallback to passthrough
+            print(f"[enhancer] Unexpected output, falling back. Response: {response_text[:200]}", flush=True)
+            return user_text, False
+
+        except Exception as e:
+            print(f"[enhancer] Error: {e}", flush=True)
+            return user_text, False
 
     def send_prompt(self, text):
         if self.busy:
@@ -390,10 +588,21 @@ class ClaudeCodeSession:
             if not self.claude_session_id and stored_claude_id:
                 self.claude_session_id = stored_claude_id
 
-        # Save user message
+        # Save original user message
         _save_message(self.db_session_id, "user", text)
 
-        cmd = [claude_path, "-p", text,
+        # ── Prompt enhancer ──
+        actual_prompt = text
+        if _enhancer_config["enabled"]:
+            self._safe_emit("claude_status", {"type": "enhancer", "text": "Enhancing prompt..."})
+            enhanced_text, was_enhanced = self._run_enhancer(text)
+            if was_enhanced:
+                actual_prompt = enhanced_text
+                self._safe_emit("claude_status", {"type": "enhancer", "text": "Prompt enhanced — executing..."})
+            else:
+                self._safe_emit("claude_status", {"type": "enhancer", "text": ""})
+
+        cmd = [claude_path, "-p", actual_prompt,
                "--dangerously-skip-permissions",
                "--output-format", "stream-json", "--verbose"]
 

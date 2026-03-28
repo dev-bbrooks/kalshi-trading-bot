@@ -4675,7 +4675,7 @@ MAIN_HTML = r"""<!-- v2-bottom-fix -->
   .term-panel.active { display: flex; }
   #term-claude-panel { background: var(--bg); }
   #term-conversation {
-    flex: 1; overflow-y: auto; padding: 12px; -webkit-overflow-scrolling: touch;
+    flex: 1; overflow-y: auto; padding: 12px; padding-bottom: 110px; -webkit-overflow-scrolling: touch;
     display: flex; flex-direction: column; gap: 12px;
   }
   #term-conversation .msg, #term-shell-output .msg { max-width: 88%; padding: 10px 14px; border-radius: 16px; font-size: 15px;
@@ -4742,30 +4742,36 @@ MAIN_HTML = r"""<!-- v2-bottom-fix -->
     border-top: 1px solid var(--border); margin-top: 4px;
   }
   #term-input-area {
-    padding: 8px 12px 30px 12px;
-    background: var(--card); border-top: 1px solid var(--border); display: flex; gap: 8px;
-    align-items: flex-end; flex-shrink: 0;
+    position: absolute; bottom: 0; left: 0; right: 0;
+    padding: 12px 12px 46px 12px;
+    background: transparent; border-top: none; display: flex; gap: 8px;
+    align-items: flex-end; pointer-events: none; z-index: 10;
   }
+
+  #term-input-area > * { pointer-events: auto; }
   #term-claude-paste-btn {
-    width: 44px; height: 44px; border-radius: 8px; border: 1px solid var(--border);
-    background: var(--bg); color: var(--dim); cursor: pointer;
+    width: 52px; height: 52px; border-radius: 12px; border: 1px solid var(--border);
+    background: rgba(13, 17, 23, 0.5); -webkit-backdrop-filter: blur(20px) saturate(1.5); backdrop-filter: blur(20px) saturate(1.5); color: var(--dim); cursor: pointer;
     flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.5);
   }
   #term-claude-paste-btn:active { background: var(--card); }
   #term-prompt-input {
-    flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
-    color: var(--text); font-size: 16px; padding: 10px 14px; resize: none;
-    font-family: inherit; line-height: 1.4; min-height: 44px; max-height: 45vh; overflow-y: auto;
+    flex: 1; background: rgba(13, 17, 23, 0.5); -webkit-backdrop-filter: blur(20px) saturate(1.5); backdrop-filter: blur(20px) saturate(1.5); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text); font-size: 16px; padding: 14px 14px; resize: none;
+    font-family: inherit; line-height: 1.4; min-height: 52px; max-height: 45vh; overflow-y: auto;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.5);
   }
   #term-prompt-input::placeholder { color: var(--dim); }
   #term-prompt-input:focus { outline: none; border-color: var(--blue); }
   #term-send-btn {
-    width: 44px; height: 44px; border-radius: 8px; border: none;
-    background: var(--blue); color: #fff; cursor: pointer;
+    width: 52px; height: 52px; border-radius: 12px; border: none;
+    background: rgba(88, 166, 255, 0.6); -webkit-backdrop-filter: blur(20px) saturate(1.5); backdrop-filter: blur(20px) saturate(1.5); color: #fff; cursor: pointer;
     flex-shrink: 0; display: flex; align-items: center; justify-content: center; transition: background 0.15s;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.5);
   }
-  #term-send-btn:disabled { background: var(--border); color: var(--dim); cursor: default; }
-  #term-send-btn.stop-btn { background: var(--red); }
+  #term-send-btn:disabled { background: rgba(48, 54, 61, 0.5); color: var(--dim); cursor: default; }
+  #term-send-btn.stop-btn { background: rgba(248, 81, 73, 0.6); }
   #term-shell-panel { background: var(--bg); }
   #term-quick-actions {
     flex-shrink: 0; border-bottom: 1px solid var(--border); background: var(--card);
@@ -4788,32 +4794,40 @@ MAIN_HTML = r"""<!-- v2-bottom-fix -->
   }
   .term-qa-btn:active { background: var(--card); color: var(--text); }
   #term-shell-output {
-    flex: 1; overflow-y: auto; padding: 12px; display: flex;
+    flex: 1; overflow-y: auto; padding: 12px; padding-bottom: 110px; display: flex;
     flex-direction: column; gap: 12px;
     background: var(--bg);
   }
   #term-shell-input-area {
-    padding: 8px 12px 30px 12px; background: var(--card); border-top: 1px solid var(--border);
-    display: flex; gap: 8px; align-items: flex-end; flex-shrink: 0;
+    position: absolute; bottom: 0; left: 0; right: 0;
+    padding: 12px 12px 46px 12px; background: transparent; border-top: none;
+    display: flex; gap: 8px; align-items: flex-end;
+    pointer-events: none; z-index: 10;
   }
+
+  #term-shell-input-area > * { pointer-events: auto; }
   #term-shell-input {
-    flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
-    color: var(--text); font-size: 16px; padding: 10px 14px; resize: none;
+    flex: 1; background: rgba(13, 17, 23, 0.5); -webkit-backdrop-filter: blur(20px) saturate(1.5); backdrop-filter: blur(20px) saturate(1.5); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text); font-size: 16px; padding: 14px 14px; resize: none;
     font-family: 'SF Mono', Menlo, Monaco, monospace; line-height: 1.4;
-    min-height: 44px; max-height: 45vh; overflow-y: auto;
+    min-height: 52px; max-height: 45vh; overflow-y: auto;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.5);
   }
   #term-shell-input::placeholder { color: var(--dim); }
   #term-shell-input:focus { outline: none; border-color: var(--blue); }
   #term-shell-send-btn {
-    width: 44px; height: 44px; border-radius: 8px; border: none;
-    background: var(--blue); color: #fff; cursor: pointer;
+    width: 52px; height: 52px; border-radius: 12px; border: none;
+    background: rgba(88, 166, 255, 0.6); -webkit-backdrop-filter: blur(20px) saturate(1.5); backdrop-filter: blur(20px) saturate(1.5); color: #fff; cursor: pointer;
     flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.5);
   }
-  #term-shell-send-btn:disabled { background: var(--border); color: var(--dim); }
+  #term-shell-send-btn:disabled { background: rgba(48, 54, 61, 0.5); color: var(--dim); cursor: default; }
+  #term-shell-send-btn.stop-btn { background: rgba(248, 81, 73, 0.6); }
   #term-shell-paste-btn {
-    width: 44px; height: 44px; border-radius: 8px; border: 1px solid var(--border);
-    background: var(--bg); color: var(--dim); cursor: pointer;
+    width: 52px; height: 52px; border-radius: 12px; border: 1px solid var(--border);
+    background: rgba(13, 17, 23, 0.5); -webkit-backdrop-filter: blur(20px) saturate(1.5); backdrop-filter: blur(20px) saturate(1.5); color: var(--dim); cursor: pointer;
     flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.5);
   }
   #term-shell-paste-btn:active { background: var(--card); }
   #term-log-panel { background: var(--bg); }
