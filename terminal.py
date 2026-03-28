@@ -139,28 +139,10 @@ def health():
     return jsonify({"status": "ok"})
 
 
-@app.route("/terminal/api/model", methods=["GET", "POST"])
+@app.route("/terminal/api/model", methods=["GET"])
 def api_model():
     if not _is_authenticated():
         return jsonify({"error": "unauthorized"}), 401
-    if request.method == "POST":
-        data = request.get_json() or {}
-        new_model = data.get("model") or None
-        old_model = _claude_model["model"]
-        _claude_model["model"] = new_model
-        # When model changes, reset Claude session so next prompt starts fresh
-        # (avoids loading Opus-sized history into Sonnet's smaller context)
-        if new_model != old_model:
-            s = _claude_session.get("session")
-            if s and not s.busy:
-                s.claude_session_id = None
-                # Clear from DB too so reconnect doesn't reload it
-                if s.db_session_id:
-                    with get_conn() as c:
-                        c.execute("UPDATE terminal_sessions SET claude_session_id = NULL WHERE id = ?",
-                                  (s.db_session_id,))
-                s.db_session_id = None
-        return jsonify({"model": _claude_model["model"]})
     return jsonify({"model": _claude_model["model"]})
 
 
@@ -357,8 +339,8 @@ def _find_claude():
             return p
     return None
 
-# Configurable model — can be changed at runtime via API
-_claude_model = {"model": None}  # None = use default
+# Model config — hardcoded to opus
+_claude_model = {"model": "opus"}
 
 # Prompt enhancer config
 _enhancer_config = {
@@ -412,11 +394,24 @@ OPTION 1 — ENHANCE: If the message is a substantial code request (new feature,
 [Your detailed prompt here]
 </ENHANCED_PROMPT>
 
-OPTION 2 — PASSTHROUGH: If the message is any of these, output ONLY this tag:
+OPTION 2 — CLARIFY: If the message is a short iterative follow-up that references something ambiguous ("it", "that", "the color", "still wrong", "make it bigger", etc.), resolve the ambiguous references using the recent message history, then output the clarified version in tags:
+<ENHANCED_PROMPT>
+[Original message with ambiguous references replaced by specific names/descriptions]
+</ENHANCED_PROMPT>
+
+This is NOT a full enhancement — do not add file paths, numbered plans, or verification steps. Just replace vague references with concrete ones so the resumed session knows exactly what "it" refers to. Keep the casual tone and brevity of the original message.
+
+Examples:
+- "increase it more" → "increase the header font size more" (if recent messages were about header font size)
+- "it's still the wrong color" → "the terminal keyboard background is still the wrong color"
+- "add a border too" → "add a border to the settings card too"
+- "try 20px" → "try 20px for the sidebar width"
+
+OPTION 3 — PASSTHROUGH: If the message is any of these, output ONLY this tag:
 <PASSTHROUGH/>
 - Conversational (greetings, "how's it going", status questions, "what did you change")
-- A short iterative follow-up where the existing session context is sufficient ("make it bigger", "increase it more", "try 20px", "change the color to blue", "add a border too")
 - A direct instruction that's already specific enough ("change X to Y in file Z")
+- A short follow-up where the reference is already clear ("make the font bigger" after just discussing fonts)
 - Anything you're uncertain about — when in doubt, passthrough
 
 RULES FOR ENHANCED PROMPTS:
@@ -428,6 +423,11 @@ RULES FOR ENHANCED PROMPTS:
 - Reference relevant project conventions from the CLAUDE.md context below
 - Do NOT include the CLAUDE.md content itself in the enhanced prompt — Claude Code already has it. Just reference specific rules when relevant.
 - Keep the enhanced prompt focused and actionable — not a lecture, a work order
+
+DEVELOPER META-INSTRUCTIONS:
+If the developer's message contains instructions addressed to you (prefixed with "enhancer," or "enhancer:" or similar), ALWAYS treat the message as ENHANCE or CLARIFY — never passthrough. Incorporate the meta-instruction into your enhanced output, but strip the "enhancer, ..." text itself from the final prompt so the working session never sees it.
+
+Exception: if the meta-instruction explicitly asks to pass through (e.g. "enhancer, pass this through", "enhancer, send as-is", "enhancer, don't change this"), strip the "enhancer, ..." text and passthrough the remaining message unchanged using <PASSTHROUGH/>.
 
 PROJECT CONTEXT (CLAUDE.md):
 ---
@@ -572,15 +572,22 @@ class ClaudeCodeSession:
             self._safe_emit("claude_error", {"text": "Still processing"})
             return
 
+        self.busy = True
+        self._emit_state("busy")
+        self.prompt_count += 1
+
+        # Run everything else in a background task so it survives disconnects
+        self.sio.start_background_task(self._execute_prompt, text)
+
+    def _execute_prompt(self, text):
+        """Background task: enhancer, process spawn, output reading."""
         claude_path = _find_claude()
         if not claude_path:
             self._safe_emit("claude_error",
                             {"text": "Claude Code not found", "detail": "Binary not in PATH"})
+            self.busy = False
+            self._emit_state("ready")
             return
-
-        self.busy = True
-        self._emit_state("busy")
-        self.prompt_count += 1
 
         # Ensure we have a db session (create on first prompt)
         if not self.db_session_id:
@@ -644,7 +651,7 @@ class ClaudeCodeSession:
 
         print(f"[terminal] Spawned claude subprocess pid={self.process.pid} cmd={cmd}", flush=True)
         self._resume_cmd = cmd  # save for retry logic
-        self.sio.start_background_task(self._read_output)
+        self._read_output()
 
     def _read_output(self):
         """Read stream-json output line by line."""
@@ -680,6 +687,12 @@ class ClaudeCodeSession:
                     continue
 
                 msg_type = msg.get("type", "")
+
+                # System init — capture model name
+                if msg_type == "system":
+                    model_id = msg.get("model")
+                    if model_id:
+                        self._safe_emit("claude_model", {"model": model_id})
 
                 # Assistant message — may contain text or tool_use
                 if msg_type == "assistant":

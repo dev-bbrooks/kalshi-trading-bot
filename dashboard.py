@@ -4083,12 +4083,7 @@ MAIN_HTML = r"""<!-- v2-bottom-fix -->
     overflow-y: auto; overscroll-behavior-y: contain;
     -webkit-overflow-scrolling: touch; padding: 8px 12px;
     transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
-  #contentWrap.terminal-active {
-    padding: 0 !important;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-  }
+  body.dev-sidebar-open #contentWrap { pointer-events: none; }
   .hdr-row { display: flex; justify-content: space-between; align-items: center; }
   #hdrBankroll:active { background: rgba(255,255,255,0.08); }
   .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px;
@@ -4613,9 +4608,7 @@ MAIN_HTML = r"""<!-- v2-bottom-fix -->
   .skel-wrap { transition: opacity 0.3s ease; }
   .skel-wrap.skel-hidden { opacity: 0; pointer-events: none; position: absolute; }
 
-  /* ── Terminal Tab ── */
-  #pageTerminal { display: none; flex-direction: column; overflow: hidden; padding: 0 !important; height: 100%; overscroll-behavior: none; background: var(--bg); }
-  #pageTerminal.active { display: flex !important; }
+  /* ── Terminal / Dev Tools ── */
   /* Claude dot states */
   .claude-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
   @keyframes term-pulse { 50% { opacity: 0.4; } }
@@ -4623,34 +4616,6 @@ MAIN_HTML = r"""<!-- v2-bottom-fix -->
   .cdot-busy { background: var(--yellow); animation: term-pulse 1s infinite; }
   .cdot-dead { background: var(--red); }
   .cdot-none { background: var(--dim); }
-
-  /* Hub grid */
-  #term-hub { padding: 16px 16px 0; background: var(--bg); }
-  .term-hub-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .term-hub-card {
-    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
-    padding: 14px; cursor: pointer; -webkit-tap-highlight-color: transparent;
-    transition: border-color 0.15s;
-  }
-  .term-hub-card:active { opacity: 0.8; }
-  .term-hub-card:hover { border-color: var(--blue); }
-  .thc-icon { color: var(--blue); margin-bottom: 8px; }
-  .thc-title { font-size: 14px; font-weight: 700; margin-bottom: 2px; }
-  .thc-desc { font-size: 11px; color: var(--dim); line-height: 1.3; }
-  .thc-preview { font-size: 11px; color: var(--dim); margin-top: 8px; display: flex; align-items: center; gap: 6px; }
-
-  /* Sub-header (back button bar) */
-  #term-sub-header {
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 8px 12px; background: var(--card); border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-  }
-  #term-sub-new-btn {
-    background: none; border: 1px solid var(--border); color: var(--dim); font-size: 11px;
-    padding: 3px 10px; border-radius: 6px; cursor: pointer; font-family: inherit;
-    -webkit-tap-highlight-color: transparent;
-  }
-  #term-sub-new-btn:active { background: var(--bg); }
 
   /* Options panel */
   .options-section { padding: 16px; }
@@ -4847,6 +4812,55 @@ MAIN_HTML = r"""<!-- v2-bottom-fix -->
     overscroll-behavior: none; background: var(--bg);
   }
 
+  /* ── Right Dev Sidebar ── */
+  #devSidebarOverlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+    z-index: 1099; opacity: 0; pointer-events: none;
+    transition: opacity 0.3s ease;
+  }
+  #devSidebarOverlay.open { opacity: 1; pointer-events: auto; }
+  #devSidebar {
+    position: fixed; top: 0; right: 0; bottom: 0; width: 88vw; max-width: 480px;
+    background: var(--bg); z-index: 1100;
+    transform: translateX(100%);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex; flex-direction: column; overflow: hidden;
+    box-shadow: -2px 0 12px rgba(0,0,0,0.5);
+  }
+  #devSidebar.open { transform: translateX(0); }
+  #devSidebar-header {
+    flex-shrink: 0; padding: 16px 20px;
+    padding-top: calc(16px + env(safe-area-inset-top, 0px));
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--card); border-bottom: 1px solid var(--border);
+    min-height: 48px;
+  }
+  #devSidebar-new-btn {
+    width: 36px; height: 36px; border-radius: 8px; border: 1px solid var(--border);
+    background: none; color: var(--dim); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #devSidebar-new-btn:active { background: var(--bg); }
+  #devSidebar-nav { flex-shrink: 0; }
+  .dev-sidebar-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 20px; color: var(--dim); font-size: 14px;
+    font-weight: 500; cursor: pointer;
+    border-left: 3px solid transparent;
+    transition: all 0.15s ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .dev-sidebar-item:active { background: rgba(255,255,255,0.05); }
+  .dev-sidebar-item.active {
+    color: var(--blue); border-left-color: var(--blue);
+    background: rgba(56,139,253,0.08);
+  }
+  .dev-sidebar-item svg { width: 18px; height: 18px; flex-shrink: 0; }
+  #devSidebar-content {
+    flex: 1; min-height: 0; position: relative; overflow: hidden;
+  }
+
 </style>
 </head>
 <body>
@@ -4878,10 +4892,6 @@ MAIN_HTML = r"""<!-- v2-bottom-fix -->
   <div class="sidebar-item" data-tab="Stats" onclick="sidebarNav('Stats')">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="12" width="4" height="9" rx="1"/><rect x="10" y="7" width="4" height="14" rx="1"/><rect x="17" y="3" width="4" height="18" rx="1"/></svg>
     <span>Stats</span>
-  </div>
-  <div class="sidebar-item" data-tab="Terminal" onclick="sidebarNav('Terminal')">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-    <span>Dev</span>
   </div>
   <div class="sidebar-item" data-tab="Settings" onclick="sidebarNav('Settings')">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"/><circle cx="12" cy="12" r="3"/></svg>
@@ -5875,104 +5885,89 @@ MAIN_HTML = r"""<!-- v2-bottom-fix -->
 </div>
 
 
-<!-- ═══ PAGE: TERMINAL ═══ -->
-<div id="pageTerminal" class="page">
-  <div id="term-hub">
-    <div class="term-hub-grid">
-      <div class="term-hub-card" data-panel="claude">
-        <div class="thc-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg></div>
-        <div class="thc-title">Claude Code</div>
-        <div class="thc-desc">AI coding assistant</div>
-        <div class="thc-preview"><span id="term-hub-claude-dot" class="claude-dot cdot-none"></span> <span id="term-hub-claude-status">No session</span></div>
-      </div>
-      <div class="term-hub-card" data-panel="shell">
-        <div class="thc-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></div>
-        <div class="thc-title">Shell</div>
-        <div class="thc-desc">Interactive terminal</div>
-        <div class="thc-preview" id="term-hub-shell-status">bash</div>
-      </div>
-      <div class="term-hub-card" data-panel="log">
-        <div class="thc-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></div>
-        <div class="thc-title">Log</div>
-        <div class="thc-desc">Raw Claude output</div>
-        <div class="thc-preview" id="term-hub-log-status">Stream viewer</div>
-      </div>
-      <div class="term-hub-card" data-panel="options">
-        <div class="thc-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></div>
-        <div class="thc-title">Options</div>
-        <div class="thc-desc">Model & settings</div>
-        <div class="thc-preview" id="term-hub-model-status">Sonnet</div>
-      </div>
-    </div>
-  </div>
-  <div id="term-sub-header" style="display:none">
-    <button id="term-back-btn" class="stats-back-btn">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-      Back
-    </button>
-    <div style="display:flex;align-items:center;gap:8px">
-      <span id="term-sub-title" style="font-size:14px;font-weight:700"></span>
-      <span id="term-claude-dot" class="claude-dot cdot-none" style="display:none"></span>
-      <button id="term-sub-new-btn" style="display:none">New</button>
-    </div>
-  </div>
-  <div id="term-panels">
-    <div id="term-claude-panel" class="term-panel">
-      <div id="term-conversation"></div>
-      <div id="term-input-area">
-        <button id="term-claude-paste-btn" title="Paste"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M12 11v6"/><path d="M9 14l3 3 3-3"/></svg></button>
-        <textarea id="term-prompt-input" rows="1" placeholder="Send a prompt to Claude Code..."></textarea>
-        <button id="term-send-btn" title="Send"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></button>
-      </div>
-    </div>
-    <div id="term-shell-panel" class="term-panel">
-      <div id="term-quick-actions" class="collapsed">
-        <div id="term-qa-toggle"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>Quick Actions</div>
-        <div id="term-qa-buttons">
-          <button class="term-qa-btn" data-cmd="supervisorctl restart plugin-btc-15m">Restart Bot</button>
-          <button class="term-qa-btn" data-cmd="supervisorctl restart platform-dashboard">Restart Dashboard</button>
-          <button class="term-qa-btn" data-cmd="tail -50 /var/log/plugin-btc-15m.err.log">Bot Logs</button>
-          <button class="term-qa-btn" data-cmd="tail -50 /var/log/platform-dashboard.err.log">Dash Logs</button>
-          <button class="term-qa-btn" data-cmd="supervisorctl status">Status</button>
-          <button class="term-qa-btn" data-cmd="df -h /">Disk</button>
-        </div>
-      </div>
-      <div id="term-shell-output"></div>
-      <div id="term-shell-input-area">
-        <button id="term-shell-paste-btn" title="Paste"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M12 11v6"/><path d="M9 14l3 3 3-3"/></svg></button>
-        <textarea id="term-shell-input" rows="1" placeholder="Enter a command..."></textarea>
-        <button id="term-shell-send-btn" title="Run"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></button>
-      </div>
-    </div>
-    <div id="term-log-panel" class="term-panel">
-      <div id="term-log-header">
-        <span>Raw Claude Code Output</span>
-        <button id="term-log-clear-btn">Clear</button>
-      </div>
-      <div id="term-log-content"></div>
-    </div>
+</div> <!-- end contentWrap -->
 
-    <!-- Options panel -->
-    <div id="term-options-panel" class="term-panel">
-      <div class="options-section">
-        <div class="options-label">MODEL</div>
-        <div class="options-model-grid">
-          <button class="options-model-btn model-active" data-model="sonnet" id="term-opt-model-sonnet">
-            <div class="omb-name">Sonnet</div>
-            <div class="omb-desc">Fast, cost-effective</div>
-          </button>
-          <button class="options-model-btn" data-model="opus" id="term-opt-model-opus">
-            <div class="omb-name">Opus</div>
-            <div class="omb-desc">Most capable</div>
-          </button>
-        </div>
-        <div class="options-hint" id="term-opt-model-hint">Current: Sonnet (default)</div>
-      </div>
+<!-- Right Dev Sidebar -->
+<div id="devSidebarOverlay" onclick="closeDevSidebar()"></div>
+<div id="devSidebar">
+  <div id="devSidebar-header">
+    <span style="font-size:15px;font-weight:600;color:var(--text)">Developer Tools</span>
+    <button id="devSidebar-new-btn" title="New Session" style="display:none">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    </button>
+  </div>
+  <div id="devSidebar-nav">
+    <div class="dev-sidebar-item active" data-panel="claude" onclick="devSidebarNav('claude')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+      <span>Claude Code</span>
+      <span id="devSidebar-claude-dot" class="claude-dot cdot-none" style="margin-left:auto"></span>
     </div>
+    <div class="dev-sidebar-item" data-panel="shell" onclick="devSidebarNav('shell')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 8l4 4-4 4"/><line x1="12" y1="16" x2="18" y2="16"/></svg>
+      <span>Shell</span>
+    </div>
+    <div class="dev-sidebar-item" data-panel="log" onclick="devSidebarNav('log')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      <span>Log</span>
+    </div>
+    <div class="dev-sidebar-item" data-panel="options" onclick="devSidebarNav('options')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+      <span>Options</span>
+    </div>
+  </div>
+  <div id="devSidebar-content">
+      <div id="term-claude-panel" class="term-panel">
+        <div id="term-conversation"></div>
+        <div id="term-input-area">
+          <button id="term-claude-paste-btn" title="Paste"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M12 11v6"/><path d="M9 14l3 3 3-3"/></svg></button>
+          <textarea id="term-prompt-input" rows="1" placeholder="Send a prompt to Claude Code..."></textarea>
+          <button id="term-send-btn" title="Send"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></button>
+        </div>
+      </div>
+      <div id="term-shell-panel" class="term-panel">
+        <div id="term-quick-actions" class="collapsed">
+          <div id="term-qa-toggle"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>Quick Actions</div>
+          <div id="term-qa-buttons">
+            <button class="term-qa-btn" data-cmd="supervisorctl restart plugin-btc-15m">Restart Bot</button>
+            <button class="term-qa-btn" data-cmd="supervisorctl restart platform-dashboard">Restart Dashboard</button>
+            <button class="term-qa-btn" data-cmd="tail -50 /var/log/plugin-btc-15m.err.log">Bot Logs</button>
+            <button class="term-qa-btn" data-cmd="tail -50 /var/log/platform-dashboard.err.log">Dash Logs</button>
+            <button class="term-qa-btn" data-cmd="supervisorctl status">Status</button>
+            <button class="term-qa-btn" data-cmd="df -h /">Disk</button>
+          </div>
+        </div>
+        <div id="term-shell-output"></div>
+        <div id="term-shell-input-area">
+          <button id="term-shell-paste-btn" title="Paste"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M12 11v6"/><path d="M9 14l3 3 3-3"/></svg></button>
+          <textarea id="term-shell-input" rows="1" placeholder="Enter a command..."></textarea>
+          <button id="term-shell-send-btn" title="Run"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></button>
+        </div>
+      </div>
+      <div id="term-log-panel" class="term-panel">
+        <div id="term-log-header">
+          <span>Raw Claude Code Output</span>
+          <button id="term-log-clear-btn">Clear</button>
+        </div>
+        <div id="term-log-content"></div>
+      </div>
+      <div id="term-options-panel" class="term-panel">
+        <div class="options-section">
+          <div class="options-label">MODEL</div>
+          <div class="options-model-grid">
+            <button class="options-model-btn model-active" data-model="sonnet" id="term-opt-model-sonnet">
+              <div class="omb-name">Sonnet</div>
+              <div class="omb-desc">Fast, cost-effective</div>
+            </button>
+            <button class="options-model-btn" data-model="opus" id="term-opt-model-opus">
+              <div class="omb-name">Opus</div>
+              <div class="omb-desc">Most capable</div>
+            </button>
+          </div>
+          <div class="options-hint" id="term-opt-model-hint">Current: Sonnet (default)</div>
+        </div>
+      </div>
   </div>
 </div>
-
-</div> <!-- end contentWrap -->
 
 <!-- Trade Detail Popup (outside contentWrap for reliable fixed positioning on iOS) -->
 <div class="confirm-overlay" id="tradeDetailOverlay" style="display:none">
@@ -6142,60 +6137,74 @@ function fallbackCopy(text, resolve, reject) {
 
   // Pull-to-refresh listeners disabled — kept for future per-section use
 })();
-// Sidebar swipe gestures — open from left edge, close from anywhere
+// Unified sidebar swipe gestures — both left and right sidebars
+var _devSidebarOpen = false;
+var _devLastPanel = 'claude';
+var _tState = 'none';
 (function() {
-  var _swipeStartX = 0;
-  var _swipeStartY = 0;
-  var _swipeTracking = false;
-  var _swipeDirection = null;
+  var _swStartX = 0, _swStartY = 0, _swTracking = false;
 
   document.addEventListener('touchstart', function(e) {
-    var t = e.touches[0];
     var target = e.target;
-
-    if (target.closest('.term-panel, #term-shell-wrap, .fs-panel, .confirm-overlay') ||
-        target.closest('input, textarea, select')) {
-      _swipeTracking = false;
-      return;
-    }
-
-    var sidebarOpen = document.body.classList.contains('sidebar-open');
-
-    if (!sidebarOpen && t.clientX <= 20) {
-      _swipeTracking = true;
-      _swipeDirection = 'open';
-      _swipeStartX = t.clientX;
-      _swipeStartY = t.clientY;
-    } else if (sidebarOpen) {
-      _swipeTracking = true;
-      _swipeDirection = 'close';
-      _swipeStartX = t.clientX;
-      _swipeStartY = t.clientY;
-    } else {
-      _swipeTracking = false;
-    }
+    if (target.closest('textarea, input, select, .confirm-overlay')) { _swTracking = false; return; }
+    _swTracking = true;
+    _swStartX = e.touches[0].clientX;
+    _swStartY = e.touches[0].clientY;
   }, {passive: true});
 
   document.addEventListener('touchend', function(e) {
-    if (!_swipeTracking) return;
-    _swipeTracking = false;
-
+    if (!_swTracking) return;
+    _swTracking = false;
     var t = e.changedTouches[0];
-    var dx = t.clientX - _swipeStartX;
-    var dy = t.clientY - _swipeStartY;
-    var absDx = Math.abs(dx);
-    var absDy = Math.abs(dy);
+    var dx = t.clientX - _swStartX, dy = t.clientY - _swStartY;
+    if (Math.abs(dx) < 50 || Math.abs(dx) <= Math.abs(dy)) return;
 
-    if (absDx <= absDy) return;
-    if (absDx < 50) return;
+    var leftOpen = document.body.classList.contains('sidebar-open');
 
-    if (_swipeDirection === 'open' && dx > 0) {
-      toggleSidebar();
-    } else if (_swipeDirection === 'close' && dx < 0) {
-      closeSidebar();
+    if (dx > 0) {
+      // Swipe right
+      if (_devSidebarOpen) closeDevSidebar();
+      else if (!leftOpen) toggleSidebar();
+    } else {
+      // Swipe left
+      if (leftOpen) closeSidebar();
+      else if (!_devSidebarOpen) openDevSidebar();
     }
   }, {passive: true});
 })();
+function openDevSidebar(panel) {
+  closeSidebar();
+  panel = panel || _devLastPanel || 'claude';
+  _devLastPanel = panel;
+  _devSidebarOpen = true;
+  try { _termInit(); } catch(e) { console.error('Terminal init error:', e); }
+  document.getElementById('devSidebar').classList.add('open');
+  document.getElementById('devSidebarOverlay').classList.add('open');
+  document.body.classList.add('dev-sidebar-open');
+  devSidebarNav(panel);
+}
+function closeDevSidebar() {
+  _devSidebarOpen = false;
+  document.getElementById('devSidebar').classList.remove('open');
+  document.getElementById('devSidebarOverlay').classList.remove('open');
+  document.body.classList.remove('dev-sidebar-open');
+  if (typeof _claudeScroller !== 'undefined' && _claudeScroller) _claudeScroller.setActive(false);
+  if (typeof _shellScroller !== 'undefined' && _shellScroller) _shellScroller.setActive(false);
+}
+function devSidebarNav(panel) {
+  _devLastPanel = panel;
+  document.querySelectorAll('.dev-sidebar-item').forEach(function(item) {
+    item.classList.toggle('active', item.dataset.panel === panel);
+  });
+  var newBtn = document.getElementById('devSidebar-new-btn');
+  if (newBtn) newBtn.style.display = panel === 'claude' ? 'flex' : 'none';
+  var dot = document.getElementById('devSidebar-claude-dot');
+  if (dot) dot.className = 'claude-dot cdot-' + (_tState || 'none');
+  document.querySelectorAll('#devSidebar .term-panel').forEach(function(p) { p.classList.remove('active'); });
+  var target = document.getElementById('term-' + panel + '-panel');
+  if (target) target.classList.add('active');
+  if (window._devNavActivate) window._devNavActivate(panel);
+}
 let currentBankroll = 0;
 let lastStateData = {};  // Store for ticking countdown
 let chartData = [];      // [{ts: Date, bid: number}] for timeline chart
@@ -12719,6 +12728,7 @@ function toggleSidebar() {
   if (sb.classList.contains('open')) {
     closeSidebar();
   } else {
+    if (_devSidebarOpen) closeDevSidebar();
     sb.classList.add('open');
     ov.classList.add('open');
     document.body.classList.add('sidebar-open');
@@ -12808,27 +12818,17 @@ function switchTab(tab) {
     item.classList.toggle('active', item.dataset.tab === tab);
   });
 
-  // Terminal needs flex layout; other tabs need normal scroll
-  const cw = document.getElementById('contentWrap');
-  if (tab === 'Terminal') {
-    cw.classList.add('terminal-active');
-    document.body.style.overscrollBehavior = 'none';
-    document.body.style.background = '#161b22';
-    document.querySelector('meta[name="theme-color"]').content = '#161b22';
-  } else {
-    cw.classList.remove('terminal-active');
-    document.body.style.overscrollBehavior = '';
-    document.body.style.background = '';
-    document.querySelector('meta[name="theme-color"]').content = '#0d1117';
-    scrollTop();
-  }
+  // Reset scroll/layout for page switches
+  document.body.style.overscrollBehavior = '';
+  document.body.style.background = '';
+  document.querySelector('meta[name="theme-color"]').content = '#0d1117';
+  scrollTop();
 
   // Tab-specific setup
   if (tab === 'Stats') { statsGoBack(); _loadLifetimeStatsInner(); }
   else if (tab === 'Regimes') { loadBtcChart(); loadRegimes(); loadRegimeWorkerStatus(); }
   else if (tab === 'Trades') loadTrades();
   else if (tab === 'Settings') { loadConfig(); loadSvcStatus(); loadSystemStats(); }
-  else if (tab === 'Terminal') { try { _termInit(); } catch(e) { console.error('Terminal init error:', e); document.getElementById('term-conversation').textContent = 'Error: ' + e.message; } }
 }
 
 // Backfill live price chart from server history
@@ -13164,8 +13164,6 @@ function _termInit() {
 
   var _ts = io('/terminal/ws', { path: '/terminal/ws/socket.io', transports: ['websocket'],
     reconnection: true, reconnectionDelay: 1000, reconnectionDelayMax: 5000 });
-  var _termCurrentPanel = 'hub'; // 'hub', 'claude', 'shell', 'log', 'options'
-  var _termSubTab = 'hub'; // kept for resize observer compat
   var _termShellInit = false;
   var _shellScroller = null, _shellCurrentResult = null, _shellOutputEl, _shellInputEl;
   function _stripAnsi(str) {
@@ -13177,69 +13175,12 @@ function _termInit() {
   var _tconv = document.getElementById('term-conversation');
   var _tpi = document.getElementById('term-prompt-input');
   var _tsb = document.getElementById('term-send-btn');
-  var _tcd = document.getElementById('term-claude-dot');
   var _tlc = document.getElementById('term-log-content');
-  var _tState = 'none', _tSessionStarting = false, _tActCard = null, _tActLog = [];
+  var _tSessionStarting = false, _tActCard = null, _tActLog = [];
   var _tDbSid = null, _tCsSid = null, _tBackendAlive = false;
   var _tRendered = 0, _tOldestId = null, _tTotal = 0, _tPS = 50;
   var _tPendingRestart = false;
   var _tModelDisplay = 'Sonnet';
-
-  // Hub navigation
-  function _termNavTo(panel) {
-    _termCurrentPanel = panel;
-    _termSubTab = panel;
-    document.getElementById('term-hub').style.display = 'none';
-    document.getElementById('term-sub-header').style.display = 'flex';
-    var titles = {claude: 'Claude Code', shell: 'Shell', log: 'Log', options: 'Options'};
-    document.getElementById('term-sub-title').textContent = titles[panel] || panel;
-    document.getElementById('term-sub-new-btn').style.display = panel === 'claude' ? '' : 'none';
-    var subDot = document.getElementById('term-claude-dot');
-    if (panel === 'claude') { subDot.style.display = ''; subDot.className = 'claude-dot cdot-' + _tState; }
-    else { subDot.style.display = 'none'; }
-    document.querySelectorAll('#pageTerminal .term-panel').forEach(function(p) { p.classList.remove('active'); });
-    var target = document.getElementById('term-' + panel + '-panel');
-    if (target) target.classList.add('active');
-    if (panel === 'shell') {
-      if (!_termShellInit) _termInitShell();
-      if (_shellScroller) _shellScroller.setActive(true);
-      _claudeScroller.setActive(false);
-    } else if (panel === 'claude') {
-      _claudeScroller.setActive(true);
-      if (_shellScroller) _shellScroller.setActive(false);
-      _tScrollBot();
-    } else {
-      _claudeScroller.setActive(false);
-      if (_shellScroller) _shellScroller.setActive(false);
-    }
-  }
-
-  function _termGoBack() {
-    _termCurrentPanel = 'hub';
-    _termSubTab = 'hub';
-    _claudeScroller.setActive(false);
-    if (_shellScroller) _shellScroller.setActive(false);
-    document.getElementById('term-hub').style.display = '';
-    document.getElementById('term-sub-header').style.display = 'none';
-    document.querySelectorAll('#pageTerminal .term-panel').forEach(function(p) { p.classList.remove('active'); });
-    _termUpdateHubPreviews();
-  }
-
-  function _termUpdateHubPreviews() {
-    var hubDot = document.getElementById('term-hub-claude-dot');
-    if (hubDot) hubDot.className = 'claude-dot cdot-' + _tState;
-    var statusMap = {none: 'No session', ready: 'Ready', busy: 'Working...', dead: 'Disconnected'};
-    var hubStatus = document.getElementById('term-hub-claude-status');
-    if (hubStatus) hubStatus.textContent = statusMap[_tState] || 'Unknown';
-    var hubModel = document.getElementById('term-hub-model-status');
-    if (hubModel) hubModel.textContent = _tModelDisplay;
-  }
-
-  // Hub card clicks
-  document.querySelectorAll('#pageTerminal .term-hub-card').forEach(function(c) {
-    c.addEventListener('click', function() { _termNavTo(c.dataset.panel); });
-  });
-  document.getElementById('term-back-btn').addEventListener('click', _termGoBack);
 
   // Shell
   function _termInitShell() {
@@ -13359,7 +13300,7 @@ function _termInit() {
   document.querySelectorAll('.term-qa-btn').forEach(function(btn) {
     btn.addEventListener('click', function() {
       if (btn.dataset.cmd) {
-        if (!_termShellInit) _termNavTo('shell');
+        if (!_termShellInit) devSidebarNav('shell');
         _shellSendCmd(btn.dataset.cmd);
       }
     });
@@ -13373,13 +13314,11 @@ function _termInit() {
     sonnetBtn.className = 'options-model-btn' + (isSonnet ? ' model-active' : '');
     opusBtn.className = 'options-model-btn' + (!isSonnet ? ' model-active-opus' : '');
     document.getElementById('term-opt-model-hint').textContent = 'Current: ' + _tModelDisplay + (isSonnet ? ' (default)' : '');
-    var hubModel = document.getElementById('term-hub-model-status');
-    if (hubModel) hubModel.textContent = _tModelDisplay;
   }
   fetch('/terminal/api/model', {credentials: 'same-origin'}).then(function(r) { return r.json(); }).then(function(d) {
     _termUpdateModelUI(d.model);
   }).catch(function() {});
-  document.querySelectorAll('#pageTerminal .options-model-btn').forEach(function(btn) {
+  document.querySelectorAll('#term-options-panel .options-model-btn').forEach(function(btn) {
     btn.addEventListener('click', function() {
       var model = btn.dataset.model;
       var apiModel = model === 'sonnet' ? null : model;
@@ -13405,13 +13344,8 @@ function _termInit() {
   // State
   function _tSetState(state) {
     _tState = state;
-    _tcd.className = 'claude-dot cdot-' + state;
-    var hubDot = document.getElementById('term-hub-claude-dot');
-    if (hubDot) hubDot.className = 'claude-dot cdot-' + state;
-    if (_termCurrentPanel === 'claude') _tcd.style.display = '';
-    var statusMap = {none: 'No session', ready: 'Ready', busy: 'Working...', dead: 'Disconnected'};
-    var hubStatus = document.getElementById('term-hub-claude-status');
-    if (hubStatus) hubStatus.textContent = statusMap[state] || '';
+    var devDot = document.getElementById('devSidebar-claude-dot');
+    if (devDot) devDot.className = 'claude-dot cdot-' + state;
     _claudeScroller.updateSendBtn();
   }
   function _tScrollBot() { _claudeScroller.scrollToBottom(); }
@@ -13469,15 +13403,6 @@ function _termInit() {
   function _tSendPrompt(text) { _tAddUser(text); _tRendered++; _tShowAct(); _ts.emit('claude_prompt', {text: text}); }
   // Send logic is now handled by _claudeScroller.onSend callback
 
-  // New session
-  document.getElementById('term-sub-new-btn').addEventListener('click', async function() {
-    if (_tState === 'busy' || _tState === 'ready') _ts.emit('claude_stop');
-    _tCsSid = null;
-    _tBackendAlive = false;
-    try { var r = await fetch('/terminal/api/session/new', {method: 'POST'}); if (r.ok) { var d = await r.json(); if (d.session) _tDbSid = d.session.id; } else { console.error('New session API returned', r.status); } } catch(e) {}
-    _tSetState('none');
-    var el = document.createElement('div'); el.className = 'session-divider'; el.textContent = '— New Session —'; _tconv.appendChild(el); _tScrollBot();
-  });
 
   // Paste button — handled by _claudeScroller
 
@@ -13602,6 +13527,34 @@ function _termInit() {
     }
   });
 
+  // Expose scroller activation for devSidebarNav
+  window._devNavActivate = function(panel) {
+    if (panel === 'shell') {
+      if (!_termShellInit) _termInitShell();
+      if (_shellScroller) _shellScroller.setActive(true);
+      _claudeScroller.setActive(false);
+    } else if (panel === 'claude') {
+      _claudeScroller.setActive(true);
+      if (_shellScroller) _shellScroller.setActive(false);
+      _tScrollBot();
+    } else {
+      _claudeScroller.setActive(false);
+      if (_shellScroller) _shellScroller.setActive(false);
+    }
+  };
+
+  // Dev sidebar new session button
+  var _devNewBtn = document.getElementById('devSidebar-new-btn');
+  if (_devNewBtn) {
+    _devNewBtn.addEventListener('click', async function() {
+      if (_tState === 'busy' || _tState === 'ready') _ts.emit('claude_stop');
+      _tCsSid = null; _tBackendAlive = false;
+      try { var r = await fetch('/terminal/api/session/new', {method: 'POST'}); if (r.ok) { var d = await r.json(); if (d.session) _tDbSid = d.session.id; } } catch(e) {}
+      _tSetState('none');
+      var el = document.createElement('div'); el.className = 'session-divider'; el.textContent = '— New Session —'; _tconv.appendChild(el); _tScrollBot();
+    });
+  }
+
   // Init
   _tLoadSession();
   _claudeScroller.updateSendBtn();
@@ -13621,7 +13574,10 @@ try {
       _initTab = (_savedRaw === 'Chat' || _savedRaw === 'Arcade') ? null : _savedRaw;
     }
   }
-  if (_initTab && document.getElementById('page' + _initTab)) switchTab(_initTab);
+  if (_initTab) {
+    if (_initTab === 'Terminal') openDevSidebar();
+    else if (document.getElementById('page' + _initTab)) switchTab(_initTab);
+  }
 } catch(e) {}
 
 // Dynamic poll rate
