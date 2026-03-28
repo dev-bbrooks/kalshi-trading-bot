@@ -104,6 +104,9 @@ Fresh deployment — data collection restart. No legacy data. Bot records all ma
 - Do NOT include restart instructions as visible text in your response (e.g. "The service needs to be restarted with `supervisorctl restart platform-terminal`"). The user sees a system message when the restart happens automatically.
 - IMPORTANT: You MUST still include the `supervisorctl restart <service>` command somewhere in your response text for the auto-restart detection to work. Put it on its own line — the terminal strips lines containing "supervisorctl restart" before displaying to the user. If you don't include it, the restart won't trigger.
 
+## Prompt Enhancer
+- All terminal prompts pass through an enhancer layer (fresh isolated Claude Code instance) that converts casual requests into detailed structured prompts. Conversational and iterative follow-ups pass through unchanged. Enhancer config in `_enhancer_config` dict. Toggle via `/terminal/api/enhancer` endpoint.
+
 ## Workflow: Plan Before Executing
 
 When receiving a request (especially anything beyond a trivial one-line fix):
