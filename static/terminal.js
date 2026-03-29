@@ -1327,42 +1327,80 @@ function _termInit() {
   }
 
   function _renderGitPushResult(data) {
+    var checkSvg = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#3fb950" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg>';
+    var xSvg = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#f85149" stroke-width="3"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>';
+
     // Find the existing git status card and update it in-place
     var existing = _tconv.querySelector('[data-widget="git_status"]');
     if (!existing) {
-      // Fallback: render as standalone message
       var msg = data.success ? ('Pushed: ' + (data.commit_hash || '') + ' ' + (data.commit_message || '')) : ('Push failed: ' + (data.message || ''));
       _tAddAsst(msg);
       return;
     }
 
-    // Remove everything after the header (file list, unpushed commits, push button)
-    var header = existing.children[0];
-    while (existing.children.length > 1) existing.removeChild(existing.lastChild);
-
-    // Update header title
-    var titleEl = header.querySelector('span');
-    if (titleEl) titleEl.textContent = data.success ? 'Pushed to GitHub' : 'Push Failed';
-
-    // Build result body
-    var body = document.createElement('div');
-    body.style.cssText = 'padding:14px;font-size:13px;display:flex;align-items:flex-start;gap:8px;line-height:1.5;';
-
     if (data.already_clean) {
-      body.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3fb950" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg> Nothing to push — already clean.';
-      body.style.color = '#3fb950';
-    } else if (data.success) {
-      var info = '';
-      if (data.commit_hash) info += '<span style="color:#58a6ff">' + data.commit_hash + '</span> — ' + (data.commit_message || '');
-      if (data.files && data.files.length > 0) info += (info ? '<br>' : '') + data.files.length + ' file' + (data.files.length > 1 ? 's' : '') + ' pushed';
-      body.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3fb950" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg> ' + info;
-      body.style.color = '#3fb950';
-    } else {
-      body.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f85149" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg> ' + (data.message || 'Push failed.');
-      body.style.color = '#f85149';
+      // Just update the push button to reflect "already clean"
+      var btn = existing.querySelector('button');
+      if (btn) {
+        btn.disabled = true;
+        btn.style.cssText = 'width:100%;padding:10px;border-radius:8px;border:1px solid rgba(63,185,80,0.4);background:rgba(63,185,80,0.1);color:#3fb950;font-size:13px;font-weight:600;font-family:inherit;cursor:default;opacity:1;';
+        btn.innerHTML = checkSvg + '&nbsp; Already clean';
+      }
+      _tScrollBot();
+      return;
     }
 
-    existing.appendChild(body);
+    if (data.success) {
+      // Update file section label
+      var sectionLabels = existing.querySelectorAll('div[style*="text-transform:uppercase"]');
+      if (sectionLabels.length > 0) {
+        sectionLabels[0].textContent = 'Committed & Pushed';
+        sectionLabels[0].style.color = '#3fb950';
+      }
+
+      // Replace each file row's status badge with a green checkmark
+      var fileSection = sectionLabels.length > 0 ? sectionLabels[0].parentNode : null;
+      if (fileSection) {
+        var rows = fileSection.querySelectorAll('div[style*="display:flex"]');
+        for (var i = 0; i < rows.length; i++) {
+          var badge = rows[i].querySelector('span');
+          if (badge && badge.style.width === '18px') {
+            badge.innerHTML = checkSvg;
+            badge.style.color = '#3fb950';
+          }
+        }
+      }
+
+      // Remove the unpushed commits section (they've been pushed now)
+      if (sectionLabels.length > 1) {
+        sectionLabels[1].parentNode.remove();
+      }
+
+      // Add the new commit as a single-line detail above the button
+      var footer = existing.querySelector('button').parentNode;
+      var commitInfo = document.createElement('div');
+      commitInfo.style.cssText = 'padding:0 14px 6px;font-size:12px;color:#8b949e;display:flex;align-items:center;gap:6px;';
+      var hash = data.commit_hash ? '<span style="color:#58a6ff">' + data.commit_hash + '</span>' : '';
+      commitInfo.innerHTML = hash + (hash && data.commit_message ? ' &mdash; ' + data.commit_message : (data.commit_message || ''));
+      existing.insertBefore(commitInfo, footer);
+
+      // Update push button to success state
+      var btn = existing.querySelector('button');
+      if (btn) {
+        btn.disabled = true;
+        btn.style.cssText = 'width:100%;padding:10px;border-radius:8px;border:1px solid rgba(63,185,80,0.4);background:rgba(63,185,80,0.1);color:#3fb950;font-size:13px;font-weight:600;font-family:inherit;cursor:default;display:flex;align-items:center;justify-content:center;gap:6px;opacity:1;';
+        btn.innerHTML = checkSvg + ' Pushed to GitHub';
+      }
+    } else {
+      // Failure — update button to error state, leave file list as-is
+      var btn = existing.querySelector('button');
+      if (btn) {
+        btn.disabled = true;
+        btn.style.cssText = 'width:100%;padding:10px;border-radius:8px;border:1px solid rgba(248,81,73,0.4);background:rgba(248,81,73,0.1);color:#f85149;font-size:13px;font-weight:600;font-family:inherit;cursor:default;display:flex;align-items:center;justify-content:center;gap:6px;opacity:1;';
+        btn.innerHTML = xSvg + ' ' + (data.message || 'Push failed');
+      }
+    }
+
     _tScrollBot();
   }
 
