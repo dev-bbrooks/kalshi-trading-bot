@@ -21,8 +21,10 @@ Plugin-specific code is under `plugins/btc_15m/`.
 - `kalshi.py` (401) — pure API client, RSA-PSS auth, dollar/FP normalization
 - `push.py` (125) — VAPID push infrastructure only (no notify_* functions)
 - `regime.py` (887) — asset-parameterized regime engine
-- `dashboard.py` (13,601) — Flask dashboard, surgical port of legacy. Owns terminal UI (Dev tab).
+- `dashboard.py` (13,425) — Flask dashboard, surgical port of legacy. Owns terminal UI (Dev tab).
 - `terminal.py` (777) — backend-only Flask+SocketIO service (port 8051). WebSocket handlers, REST API, PTY, Claude Code sessions. No HTML — dashboard.py serves the UI.
+- `static/terminal.js` (1,374) — terminal JavaScript (PanelScroller, Claude Code session, shell, design widgets, sidebar nav)
+- `static/terminal.css` (355) — terminal CSS (panel headers/footers, chat, shell, dev sidebar, design widgets)
 
 ### Plugin layer (plugins/btc_15m/)
 - `plugin.py` (160) — Btc15mPlugin subclass, owns default config
@@ -104,8 +106,128 @@ Fresh deployment — data collection restart. No legacy data. Bot records all ma
 - Do NOT include restart instructions as visible text in your response (e.g. "The service needs to be restarted with `supervisorctl restart platform-terminal`"). The user sees a system message when the restart happens automatically.
 - IMPORTANT: You MUST still include the `supervisorctl restart <service>` command somewhere in your response text for the auto-restart detection to work. Put it on its own line — the terminal strips lines containing "supervisorctl restart" before displaying to the user. If you don't include it, the restart won't trigger.
 
+## Terminal Code Separation
+
+Terminal UI code lives in two dedicated files:
+- `static/terminal.js` — all terminal JavaScript (widget renderer, controls, shell, Claude Code session, hub navigation, etc.)
+- `static/terminal.css` — all terminal CSS
+- `dashboard.py` includes these via `<script>` and `<link>` tags
+
+**Rules for terminal code:**
+- ALL new terminal JS goes in `static/terminal.js`, never inline in dashboard.py
+- ALL new terminal CSS goes in `static/terminal.css`, never inline in dashboard.py
+- If a task requires editing terminal JS or CSS that is still in dashboard.py (legacy remnants from before the separation), move that specific code to the appropriate file as part of the edit
+- Do not go looking for code to migrate — only move code that you're already editing for the current task
+
 ## Prompt Enhancer
 - All terminal prompts pass through an enhancer layer (fresh isolated Claude Code instance) that converts casual requests into detailed structured prompts. Conversational and iterative follow-ups pass through unchanged. Enhancer config in `_enhancer_config` dict. Toggle via `/terminal/api/enhancer` endpoint.
+
+## Design Widget
+
+When the user asks to see, adjust, or tweak styling/visual properties of a UI element, respond with a design widget instead of text. This includes requests like:
+- "show me the header styles"
+- "let me adjust the card colors"
+- "what can I change on the sidebar"
+- "let me choose the background color"
+
+Do NOT emit a widget for functional/behavioral requests like "fix the header bug" or "add a new button." If you can't find the element or are unsure what the user is referring to, respond with normal text and ask for clarification.
+
+### How to investigate
+
+1. Identify which file(s) contain the element's styles (usually dashboard.py for UI).
+2. Read the relevant code section.
+3. Identify the most useful visual properties — colors, sizes, padding, margins, borders, border-radius, font sizes, font weights, opacity, shadows. Filter to what's most likely to be tweaked. Do not include every single CSS property — surface the most useful ones. The user can ask you to add more.
+4. For each property, capture:
+   - Current value
+   - Exact line number
+   - The full CSS declaration string (e.g., `background-color: #1a1a2e`) for verification
+   - A CSS selector that targets the element in the browser (if identifiable with confidence)
+5. Scan for other color values used in the file to build a palette array.
+
+### Widget payload format
+
+Emit the widget JSON wrapped in `<!--DESIGN_WIDGET-->` / `<!--/DESIGN_WIDGET-->` delimiters. Do not include any other text in your response — no preamble, no explanation. The frontend strips the delimiters and renders the widget directly.
+
+Schema:
+
+```json
+{
+  "element_id": "header-bar",
+  "element_label": "Header Bar",
+  "palette": ["#1a1a2e", "#16213e", "#0f3460", "#e94560"],
+  "properties": [
+    {
+      "key": "bg_color",
+      "label": "Background",
+      "type": "color",
+      "value": "#1a1a2e",
+      "source": {
+        "file": "dashboard.py",
+        "line": 342,
+        "match": "background-color: #1a1a2e"
+      },
+      "preview": {
+        "selector": "#main-header",
+        "css_property": "background-color",
+        "confidence": "high"
+      }
+    }
+  ]
+}
+```
+
+**Control types and their fields:**
+
+|Type    |Renders as                              |Required fields                                                              |Optional fields     |
+|--------|----------------------------------------|-----------------------------------------------------------------------------|--------------------|
+|`color` |Swatch palette → full picker + hex input|`value` (hex string)                                                         |                    |
+|`px`    |Number input + stepper buttons          |`value` (number)                                                             |`min`, `max`, `step`|
+|`toggle`|On/off switch                           |`value` (bool), `toggle_values` (`{"on": "css string", "off": "css string"}`)|                    |
+|`select`|Dropdown                                |`value` (string), `options` (array of strings)                               |                    |
+|`range` |Slider + number input                   |`value` (number), `min`, `max`, `step`                                       |                    |
+
+**All properties require:**
+
+- `key` — unique within the widget
+- `label` — human-readable label
+- `type` — one of: color, px, toggle, select, range
+- `value` — current value from code
+- `source` — object with `file` (relative path from /opt/trading-platform/), `line` (line number), `match` (exact CSS declaration string for verification)
+
+**Optional per-property:**
+
+- `preview` — object with `selector` (CSS selector), `css_property` (CSS property name), `confidence` ("high" or "medium"). Omit entirely if no stable selector can be identified — do not include low-confidence previews.
+
+**Top-level fields:**
+
+- `element_id` — consistent identifier for the element (e.g., "header-bar"). Used to replace previous widgets on follow-up requests.
+- `element_label` — human-readable name shown as widget title
+- `palette` — array of hex colors found used in the codebase vicinity, shared across all color controls
+
+### Follow-up requests
+
+If the user asks to add or remove properties from an existing widget (e.g., "add blur and shadow too" or "I don't need the font weight"), re-read the code and emit a complete replacement payload with the same `element_id`. Include all desired properties with fresh values from the current code. The frontend replaces the previous widget.
+
+### DESIGN_APPLY handling
+
+When you receive a prompt wrapped in `[DESIGN_APPLY]` / `[/DESIGN_APPLY]` tags, it contains surgical style changes from the design widget. Each change specifies a file, line number, old value, and new value. Your job:
+
+1. Open the file and verify the old value exists at the specified line.
+1. If it matches, replace the old value with the new value using str_replace or equivalent.
+1. If the line has shifted or the value doesn't match, search nearby (±10 lines) for the old value. If found, apply there. If not found, report the issue — do not guess.
+1. After all changes, run `python3 -m py_compile` on any modified .py files.
+1. Respond with a brief confirmation (e.g., "Applied 3 changes to dashboard.py"). Do not emit a new widget.
+
+Format:
+
+```
+[DESIGN_APPLY]
+Element: Header Bar
+File: dashboard.py
+1. Line 342: "background-color: #1a1a2e" → "background-color: #2a2a3e"
+2. Line 345: "padding: 12px 16px" → "padding: 20px 16px"
+[/DESIGN_APPLY]
+```
 
 ## Workflow: Plan Before Executing
 
