@@ -353,3 +353,141 @@
 }
 #devPanels.active { display: flex; }
 #devPanels-wrap { flex: 1; min-height: 0; position: relative; }
+
+/* ── Widget Cards (shared) ── */
+.widget-card {
+  margin: 8px 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+/* ── Git Widget ── */
+.git-widget-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.git-widget-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.git-widget-branch {
+  font-size: 12px;
+  font-family: 'SF Mono', Menlo, Monaco, monospace;
+  color: var(--blue);
+  text-decoration: none;
+}
+.git-section {
+  padding: 10px 14px;
+}
+.git-section + .git-section {
+  border-top: 1px solid var(--border);
+}
+.git-section-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--dim);
+  margin-bottom: 8px;
+}
+.git-file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 13px;
+}
+.git-status-badge {
+  font-family: 'SF Mono', Menlo, Monaco, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  width: 18px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.git-status-modified { color: var(--yellow); }
+.git-status-added { color: var(--green); }
+.git-status-deleted { color: var(--red); }
+.git-status-untracked { color: var(--dim); }
+.git-status-other { color: var(--dim); }
+.git-file-name {
+  font-family: 'SF Mono', Menlo, Monaco, monospace;
+  font-size: 12px;
+  color: var(--text);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.git-file-changes {
+  font-family: 'SF Mono', Menlo, Monaco, monospace;
+  font-size: 11px;
+  color: var(--dim);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.git-commit-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 13px;
+}
+.git-commit-hash {
+  font-family: 'SF Mono', Menlo, Monaco, monospace;
+  font-size: 11px;
+  color: var(--blue);
+  flex-shrink: 0;
+}
+.git-commit-msg {
+  color: var(--text);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.git-clean-msg {
+  padding: 16px 14px;
+  color: var(--green);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.git-widget-footer {
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+}
+.git-push-btn {
+  width: 100%;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(88, 166, 255, 0.4);
+  background: rgba(88, 166, 255, 0.12);
+  color: var(--blue);
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.git-push-btn:active { opacity: 0.7; }
+.git-push-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.git-push-body {
+  padding: 14px;
+  font-size: 13px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  line-height: 1.5;
+}

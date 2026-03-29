@@ -7,7 +7,7 @@ import eventlet
 eventlet.monkey_patch()
 import eventlet.tpool
 
-import os, sys, pty, json, errno, signal, struct, fcntl, termios, hashlib, secrets, shutil, subprocess
+import os, sys, pty, json, errno, signal, struct, fcntl, termios, hashlib, secrets, shutil, subprocess, re
 import pwd
 from flask import Flask, request, jsonify
 from flask_socketio import SocketIO, emit, disconnect
@@ -358,6 +358,122 @@ _enhancer_config = {
 
 _CLAUDE_MD_PATH = "/opt/trading-platform/CLAUDE.md"
 
+# ── Message router ───────────────────────────────────────────
+
+_DIRECT_PATTERNS = {
+    "git_status": [
+        re.compile(r"^(git\s+)?status$", re.I),
+        re.compile(r"what('s| has| hasn't| is).*\b(committed|pushed|changed|uncommitted|unpushed)\b", re.I),
+        re.compile(r"show\s+(me\s+)?(uncommitted|unpushed|changed|dirty|git)", re.I),
+        re.compile(r"any(thing)?\s+(to\s+)?(commit|push)", re.I),
+    ],
+    "git_push": [
+        re.compile(r"^(git\s+)?push$", re.I),
+        re.compile(r"^push\s+(it|to\s+github|everything|changes)$", re.I),
+        re.compile(r"^commit\s+and\s+push$", re.I),
+    ],
+    "git_diff": [
+        re.compile(r"^(git\s+)?diff$", re.I),
+        re.compile(r"what('s| did).*change", re.I),
+        re.compile(r"show\s+(me\s+)?(the\s+)?diff", re.I),
+    ],
+    "shell": [
+        re.compile(r"^supervisorctl\s+", re.I),
+        re.compile(r"^df\s+-h$", re.I),
+        re.compile(r"^free\s+-m$", re.I),
+        re.compile(r"^uptime$", re.I),
+        re.compile(r"^pip3?\s+(list|show|install)\b", re.I),
+        re.compile(r"^python3?\s+--version$", re.I),
+        re.compile(r"^cat\s+/etc/supervisor", re.I),
+    ],
+}
+
+def _route_message(text):
+    """Route a message to direct handler, enhancer, or passthrough.
+    Returns (action, handler_name, payload) tuple.
+    action: 'direct', 'enhance', or 'passthrough'
+    """
+    stripped = text.strip()
+    for handler_name, patterns in _DIRECT_PATTERNS.items():
+        for pattern in patterns:
+            if pattern.search(stripped):
+                return ("direct", handler_name, {"raw_text": stripped})
+    # Not a direct action — let enhancer/passthrough logic decide
+    return ("enhance" if _enhancer_config["enabled"] else "passthrough", None, None)
+
+
+# ── Git helpers ──────────────────────────────────────────────
+
+_GIT_DIR = "/opt/trading-platform"
+
+def _run_git(args):
+    """Run a git command and return (returncode, stdout, stderr)."""
+    try:
+        r = subprocess.run(
+            ["git"] + args,
+            cwd=_GIT_DIR,
+            capture_output=True, text=True, timeout=15
+        )
+        return r.returncode, r.stdout.rstrip(), r.stderr.strip()
+    except Exception as e:
+        return 1, "", str(e)
+
+def _git_status_data():
+    """Gather git status, diff stats, and unpushed commits."""
+    # Branch
+    _, branch, _ = _run_git(["branch", "--show-current"])
+
+    # Uncommitted files
+    _, porcelain, _ = _run_git(["status", "--porcelain"])
+    uncommitted = []
+    for line in porcelain.splitlines():
+        if len(line) >= 4:
+            status = line[:2].strip()
+            filepath = line[3:]
+            uncommitted.append({"status": status, "file": filepath})
+
+    # Diff stat (for tracked modified files)
+    _, diff_stat_raw, _ = _run_git(["diff", "--stat", "--stat-width=60"])
+    diff_stat = []
+    for line in diff_stat_raw.splitlines():
+        if "|" in line and ("+" in line or "-" in line or "Bin" in line):
+            parts = line.split("|")
+            fname = parts[0].strip()
+            changes = parts[1].strip() if len(parts) > 1 else ""
+            diff_stat.append({"file": fname, "changes": changes})
+
+    # Also get staged diff stat
+    _, staged_stat_raw, _ = _run_git(["diff", "--cached", "--stat", "--stat-width=60"])
+    for line in staged_stat_raw.splitlines():
+        if "|" in line and ("+" in line or "-" in line or "Bin" in line):
+            parts = line.split("|")
+            fname = parts[0].strip()
+            changes = parts[1].strip() if len(parts) > 1 else ""
+            # Avoid duplicates
+            if not any(d["file"] == fname for d in diff_stat):
+                diff_stat.append({"file": fname, "changes": changes})
+
+    # Unpushed commits
+    _, unpushed_raw, _ = _run_git(["log", "origin/main..HEAD", "--oneline"])
+    unpushed = []
+    for line in unpushed_raw.splitlines():
+        if line.strip():
+            parts = line.split(" ", 1)
+            unpushed.append({
+                "hash": parts[0],
+                "message": parts[1] if len(parts) > 1 else ""
+            })
+
+    clean = len(uncommitted) == 0 and len(unpushed) == 0
+    return {
+        "branch": branch or "main",
+        "uncommitted": uncommitted,
+        "diff_stat": diff_stat,
+        "unpushed": unpushed,
+        "clean": clean,
+    }
+
+
 def _read_claude_md():
     """Read CLAUDE.md from disk each time (always current)."""
     try:
@@ -584,6 +700,114 @@ class ClaudeCodeSession:
             print(f"[enhancer] Error: {e}", flush=True)
             return user_text, False
 
+    def _emit_widget(self, widget_type, data):
+        """Emit a widget response using delimiter-based encoding (like design widgets)."""
+        widget_json = json.dumps({"type": widget_type, "data": data})
+        text = f"__WIDGET__{widget_json}__/WIDGET__"
+        print(f"[router] emitting widget text len={len(text)}: {text[:120]}", flush=True)
+        self._safe_emit("claude_response", {"text": text})
+
+    def _handle_direct(self, handler_name, payload):
+        """Dispatch to the appropriate direct handler."""
+        handlers = {
+            "git_status": self._direct_git_status,
+            "git_push": self._direct_git_push,
+            "git_diff": self._direct_git_diff,
+            "shell": self._direct_shell,
+        }
+        fn = handlers.get(handler_name)
+        if fn:
+            fn(payload)
+        else:
+            self._safe_emit("claude_error", {"text": f"Unknown handler: {handler_name}"})
+
+    def _direct_git_status(self, payload):
+        """Handle git status request — emit git widget."""
+        self._safe_emit("claude_status", {"type": "direct", "text": "Checking git status..."})
+        data = _git_status_data()
+        self._emit_widget("git_status", data)
+
+    def _direct_git_push(self, payload):
+        """Handle git push — commit all + push."""
+        self._safe_emit("claude_status", {"type": "direct", "text": "Pushing to GitHub..."})
+
+        # Check if there's anything to commit
+        status_data = _git_status_data()
+
+        if status_data["clean"]:
+            self._emit_widget("git_push_result", {
+                "success": True, "already_clean": True,
+                "message": "Nothing to commit or push — working tree clean."
+            })
+            return
+
+        # Stage all
+        rc, _, err = _run_git(["add", "-A"])
+        if rc != 0:
+            self._emit_widget("git_push_result", {
+                "success": False, "message": f"git add failed: {err}"
+            })
+            return
+
+        # Generate commit message from changed files
+        changed_files = [f["file"] for f in status_data["uncommitted"]]
+        if len(changed_files) <= 5:
+            commit_msg = "Update " + ", ".join(changed_files)
+        else:
+            commit_msg = f"Update {len(changed_files)} files"
+
+        # Commit (only if there are uncommitted changes)
+        committed = False
+        if status_data["uncommitted"]:
+            rc, out, err = _run_git(["commit", "-m", commit_msg])
+            if rc != 0 and "nothing to commit" not in err.lower():
+                self._emit_widget("git_push_result", {
+                    "success": False, "message": f"git commit failed: {err}"
+                })
+                return
+            committed = True
+
+        # Push
+        rc, out, err = _run_git(["push"])
+        if rc != 0:
+            self._emit_widget("git_push_result", {
+                "success": False, "message": f"git push failed: {err}"
+            })
+            return
+
+        # Get the new commit hash
+        _, new_hash, _ = _run_git(["rev-parse", "--short", "HEAD"])
+
+        self._emit_widget("git_push_result", {
+            "success": True,
+            "committed": committed,
+            "commit_hash": new_hash,
+            "commit_message": commit_msg if committed else None,
+            "files": changed_files,
+            "pushed_to": "origin/main",
+        })
+
+    def _direct_git_diff(self, payload):
+        """Show compact diff."""
+        self._safe_emit("claude_status", {"type": "direct", "text": "Getting diff..."})
+        _, diff_output, _ = _run_git(["diff", "--stat"])
+        _, staged_output, _ = _run_git(["diff", "--cached", "--stat"])
+        combined = (diff_output + "\n" + staged_output).strip()
+        if not combined:
+            combined = "No changes."
+        self._safe_emit("claude_response", {"text": combined})
+
+    def _direct_shell(self, payload):
+        """Run an allowed shell command directly."""
+        cmd = payload.get("raw_text", "")
+        self._safe_emit("claude_status", {"type": "direct", "text": f"Running: {cmd}"})
+        try:
+            r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30, cwd=_GIT_DIR)
+            output = (r.stdout + r.stderr).strip() or "(no output)"
+            self._safe_emit("claude_response", {"text": output})
+        except Exception as e:
+            self._safe_emit("claude_error", {"text": f"Command failed: {e}"})
+
     def send_prompt(self, text, enhance=False):
         if self.busy:
             self._safe_emit("claude_error", {"text": "Still processing"})
@@ -614,6 +838,15 @@ class ClaudeCodeSession:
 
         # Save original user message
         _save_message(self.db_session_id, "user", text)
+
+        # ── Router (always runs) ──
+        action, handler_name, route_payload = _route_message(text)
+
+        if action == "direct":
+            self._handle_direct(handler_name, route_payload)
+            self.busy = False
+            self._emit_state("ready")
+            return
 
         # ── Prompt enhancer ──
         actual_prompt = text
@@ -1015,6 +1248,30 @@ def ws_claude_stop():
     s = _claude_session["session"]
     if s and s.sid == request.sid:
         _cleanup_claude()
+
+
+@socketio.on("direct_action", namespace="/terminal/ws")
+def ws_direct_action(data):
+    """Handle direct actions triggered by widget buttons (e.g., push from git status widget)."""
+    token = request.cookies.get("platform_auth")
+    if not token or not secrets.compare_digest(token, _auth_token()):
+        disconnect()
+        return
+
+    s = _claude_session.get("session")
+    if not s:
+        # Create a temporary session just for this action
+        s = ClaudeCodeSession(socketio, request.sid)
+        _claude_session["session"] = s
+
+    action = data.get("action", "") if isinstance(data, dict) else ""
+    s.sid = request.sid  # ensure emits go to this client
+
+    if action == "git_push":
+        s._safe_emit("claude_status", {"type": "direct", "text": "Pushing..."})
+        s._direct_git_push(data.get("args", {}))
+    else:
+        emit("claude_error", {"text": f"Unknown action: {action}"})
 
 
 @socketio.on("style_override", namespace="/terminal/ws")

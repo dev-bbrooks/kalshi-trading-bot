@@ -6,6 +6,7 @@ All displayed times are Central Time.
 
 import json
 import os
+import time as _time
 import requests as http_requests
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
@@ -3999,10 +4000,12 @@ def api_deploy_restart():
 
 
 
+_STATIC_V = str(int(_time.time()))
+
 @app.route("/")
 @requires_auth
 def index():
-    html = MAIN_HTML
+    html = MAIN_HTML.replace("STATIC_VERSION_PLACEHOLDER", _STATIC_V)
     resp = Response(html, content_type="text/html")
     resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return resp
@@ -4030,7 +4033,7 @@ MAIN_HTML = r"""<!-- v2-bottom-fix -->
 <meta name="theme-color" content="#0d1117">
 <link rel="apple-touch-icon" href="/icon-192.png">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css">
-<link rel="stylesheet" href="/static/terminal.css">
+<link rel="stylesheet" href="/static/terminal.css?_v=STATIC_VERSION_PLACEHOLDER">
 <title>Kalshi BTC Bot</title>
 <style>
   :root { --bg: #0d1117; --card: #161b22; --border: #30363d; --text: #c9d1d9;
@@ -5753,7 +5756,7 @@ MAIN_HTML = r"""<!-- v2-bottom-fix -->
 <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4.7.2/dist/socket.io.min.js"></script>
-<script src="/static/terminal.js"></script>
+<script src="/static/terminal.js?_v=STATIC_VERSION_PLACEHOLDER"></script>
 <script>
 const $ = s => document.querySelector(s);
 function _cw() { return document.getElementById('contentWrap'); }

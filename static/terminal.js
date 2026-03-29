@@ -1126,6 +1126,17 @@ function _termInit() {
     _tScrollBot();
   }
   function _tAddAsst(text, raw, activity) {
+    // Check for router widget payload
+    var wStart = '__WIDGET__', wEnd = '__/WIDGET__';
+    var wi = (raw || text).indexOf(wStart);
+    if (wi !== -1) {
+      var we = (raw || text).indexOf(wEnd, wi);
+      if (we !== -1) {
+        var wp = JSON.parse((raw || text).substring(wi + wStart.length, we).trim());
+        _renderWidget(wp);
+        return;
+      }
+    }
     // Check for design widget payload
     var dwStart = '<!--DESIGN_WIDGET-->', dwEnd = '<!--/DESIGN_WIDGET-->';
     var si = (raw || text).indexOf(dwStart);
@@ -1194,6 +1205,160 @@ function _termInit() {
 
   // Paste button — handled by _claudeScroller
 
+  // ── Widget rendering ──
+  function _renderWidget(widget) {
+    var renderers = {
+      'git_status': _renderGitStatus,
+      'git_push_result': _renderGitPushResult,
+    };
+    var fn = renderers[widget.type];
+    if (fn) {
+      try {
+        fn(widget.data);
+      } catch(e) {
+        var errDiv = document.createElement('div');
+        errDiv.style.cssText = 'padding:12px;margin:8px;background:#1a1a2e;border:2px solid #f85149;border-radius:8px;color:#f85149;font-size:13px;font-family:monospace;white-space:pre-wrap;';
+        errDiv.textContent = 'Widget error: ' + e.message + '\n' + e.stack;
+        _tconv.appendChild(errDiv);
+        _tScrollBot();
+      }
+    } else {
+      _tAddAsst(JSON.stringify(widget.data, null, 2));
+    }
+  }
+
+  function _renderGitStatus(data) {
+    var mono = "'SF Mono',Menlo,Monaco,monospace";
+    var card = document.createElement('div');
+    card.style.cssText = 'align-self:flex-start;max-width:88%;width:100%;margin:4px 0;background:#161b22;border:1px solid #30363d;border-radius:12px;border-bottom-left-radius:4px;overflow:visible;';
+
+    // Header
+    var header = document.createElement('div');
+    header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-bottom:1px solid #30363d;';
+    var title = document.createElement('span');
+    title.style.cssText = 'font-size:14px;font-weight:600;color:#c9d1d9;';
+    title.textContent = 'Git Status';
+    header.appendChild(title);
+    var branchEl = document.createElement('a');
+    branchEl.style.cssText = 'font-size:12px;color:#58a6ff;text-decoration:none;';
+    branchEl.textContent = data.branch || 'main';
+    branchEl.href = 'https://github.com/dev-bbrooks/15-min-btc-bot';
+    branchEl.target = '_blank';
+    header.appendChild(branchEl);
+    card.appendChild(header);
+
+    if (data.clean) {
+      var cleanMsg = document.createElement('div');
+      cleanMsg.style.cssText = 'padding:16px 14px;color:#3fb950;font-size:13px;display:flex;align-items:center;gap:8px;';
+      cleanMsg.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3fb950" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg> Working tree clean';
+      card.appendChild(cleanMsg);
+    } else {
+      // Files section
+      if (data.uncommitted && data.uncommitted.length > 0) {
+        var section = document.createElement('div');
+        section.style.cssText = 'padding:10px 14px;';
+        var sLabel = document.createElement('div');
+        sLabel.style.cssText = 'font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.3px;color:#8b949e;margin-bottom:8px;';
+        sLabel.textContent = 'Uncommitted Changes (' + data.uncommitted.length + ')';
+        section.appendChild(sLabel);
+
+        var statusColors = { M: '#d29922', A: '#3fb950', D: '#f85149' };
+        for (var i = 0; i < data.uncommitted.length; i++) {
+          var f = data.uncommitted[i];
+          var row = document.createElement('div');
+          row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 0;';
+          var badge = document.createElement('span');
+          badge.style.cssText = 'font-size:11px;font-weight:700;width:18px;text-align:center;flex-shrink:0;color:' + (statusColors[f.status] || '#8b949e') + ';';
+          badge.textContent = f.status === '??' ? 'U' : f.status;
+          row.appendChild(badge);
+          var fname = document.createElement('span');
+          fname.style.cssText = 'font-size:12px;color:#c9d1d9;';
+          fname.textContent = f.file;
+          row.appendChild(fname);
+          section.appendChild(row);
+        }
+        card.appendChild(section);
+      }
+
+      // Unpushed commits
+      if (data.unpushed && data.unpushed.length > 0) {
+        var uSec = document.createElement('div');
+        uSec.style.cssText = 'padding:10px 14px;border-top:1px solid #30363d;';
+        var uLbl = document.createElement('div');
+        uLbl.style.cssText = 'font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.3px;color:#8b949e;margin-bottom:8px;';
+        uLbl.textContent = 'Unpushed Commits (' + data.unpushed.length + ')';
+        uSec.appendChild(uLbl);
+        for (var j = 0; j < data.unpushed.length; j++) {
+          var cm = data.unpushed[j];
+          var cRow = document.createElement('div');
+          cRow.style.cssText = 'display:flex;align-items:baseline;gap:8px;padding:3px 0;';
+          var h = document.createElement('span');
+          h.style.cssText = 'font-size:11px;color:#58a6ff;';
+          h.textContent = cm.hash;
+          cRow.appendChild(h);
+          var m = document.createElement('span');
+          m.style.cssText = 'font-size:12px;color:#c9d1d9;';
+          m.textContent = cm.message;
+          cRow.appendChild(m);
+          uSec.appendChild(cRow);
+        }
+        card.appendChild(uSec);
+      }
+
+      // Push button
+      var footer = document.createElement('div');
+      footer.style.cssText = 'padding:10px 14px;border-top:1px solid #30363d;';
+      var pushBtn = document.createElement('button');
+      pushBtn.style.cssText = 'width:100%;padding:10px;border-radius:8px;border:1px solid rgba(88,166,255,0.4);background:rgba(88,166,255,0.12);color:#58a6ff;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer;';
+      pushBtn.textContent = 'Push All';
+      pushBtn.addEventListener('click', function() {
+        pushBtn.disabled = true;
+        pushBtn.style.opacity = '0.5';
+        pushBtn.textContent = 'Pushing...';
+        _ts.emit('direct_action', { action: 'git_push' });
+      });
+      footer.appendChild(pushBtn);
+      card.appendChild(footer);
+    }
+
+    _tconv.appendChild(card);
+    _tScrollBot();
+  }
+
+  function _renderGitPushResult(data) {
+    var card = document.createElement('div');
+    card.style.cssText = 'align-self:flex-start;max-width:88%;width:100%;margin:4px 0;background:#161b22;border:1px solid #30363d;border-radius:12px;border-bottom-left-radius:4px;overflow:visible;';
+
+    var header = document.createElement('div');
+    header.style.cssText = 'display:flex;align-items:center;padding:12px 14px;border-bottom:1px solid #30363d;';
+    var title = document.createElement('span');
+    title.style.cssText = 'font-size:14px;font-weight:600;color:#c9d1d9;';
+    title.textContent = data.success ? 'Pushed' : 'Push Failed';
+    header.appendChild(title);
+    card.appendChild(header);
+
+    var body = document.createElement('div');
+    body.style.cssText = 'padding:14px;font-size:13px;display:flex;align-items:flex-start;gap:8px;line-height:1.5;';
+
+    if (data.already_clean) {
+      body.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3fb950" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg> Nothing to push — already clean.';
+      body.style.color = '#3fb950';
+    } else if (data.success) {
+      var info = '';
+      if (data.commit_hash) info += data.commit_hash + ' — ' + (data.commit_message || '');
+      if (data.files && data.files.length > 0) info += (info ? '<br>' : '') + data.files.length + ' file' + (data.files.length > 1 ? 's' : '') + ' pushed';
+      body.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3fb950" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg> ' + info;
+      body.style.color = '#3fb950';
+    } else {
+      body.textContent = data.message || 'Push failed.';
+      body.style.color = '#f85149';
+    }
+
+    card.appendChild(body);
+    _tconv.appendChild(card);
+    _tScrollBot();
+  }
+
   // Claude WebSocket events
   _ts.on('claude_state', function(d) {
     if (d.state === 'ready') { if (_tState === 'busy') _tCollapseAct(); _tSetState('ready'); }
@@ -1211,7 +1376,9 @@ function _termInit() {
     _tUpdateAct(d.text);
   });
   _ts.on('claude_response', function(d) {
-    _tCollapseAct(); if (d.id) _tCsSid = d.id; _tAddAsst(d.text, d.text); _tRendered++;
+    _tCollapseAct(); if (d.id) _tCsSid = d.id;
+    console.log('[CR] text len=' + (d.text||'').length + ' first80=' + (d.text||'').substring(0,80));
+    _tAddAsst(d.text, d.text); _tRendered++;
   });
   _ts.on('claude_error', function(d) { _tCollapseAct(); _tAddErr(d.text + (d.detail ? ': ' + d.detail : ''), true); _tRendered++;
     if (_tState === 'busy') _tSetState('dead'); });
