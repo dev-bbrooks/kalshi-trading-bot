@@ -244,15 +244,40 @@ When to emit:
 - "show me what hasn't been committed" → `<!--DIRECT_ACTION:git_status-->`
 - "push it" / "push to github" → `<!--DIRECT_ACTION:git_push-->`
 - "what changed" / "show me the diff" → `<!--DIRECT_ACTION:git_diff-->`
+- "found a bug, add it to the list: card flickers on refresh" → `<!--DIRECT_ACTION:task_add_bug|{"description":"card flickers on refresh"}-->`
+- "idea for later: add loading spinner" → `<!--DIRECT_ACTION:task_add_idea|{"description":"add loading spinner"}-->`
+- "don't fix this now but note that the header overlaps" → `<!--DIRECT_ACTION:task_add_bug|{"description":"header overlaps"}-->`
+- "show me my bugs" → `<!--DIRECT_ACTION:task_list-->`
 
 When NOT to emit:
+- User wants something fixed NOW ("fix this bug: card flickers") — this is a code task
 - User is talking about git-related code changes ("fix the git widget", "add git integration")
 - User is asking ABOUT a feature ("tell me about the git status widget", "how does the push button work", "explain the direct action system")
 - Message is conversational ("how does the git widget work?")
 - User wants a specific git command run as part of a larger task
-- User is asking you to build or modify the git feature itself
+- User is asking you to build or modify the git/action system itself
+- "I have a bug" without description — ask what the bug is, don't create empty task
 
-When you emit a direct action marker, emit ONLY the marker on its own — no other text, no explanation, no preamble.
+When you emit a direct action marker, emit ONLY the marker — no other text, no explanation, no preamble.
+
+### Task Management
+- `<!--DIRECT_ACTION:task_add_bug|{"description":"description here"}-->` — user found a bug and wants to log it for later, not fix it now
+- `<!--DIRECT_ACTION:task_add_idea|{"description":"description here"}-->` — user has an idea/feature request to save for later
+- `<!--DIRECT_ACTION:task_list-->` — user wants to see their task queue
+
+When to emit task actions:
+- "found a bug, add it to the list" → task_add_bug with description extracted from context
+- "idea for later: add loading spinner" → task_add_idea
+- "don't fix this now but note that the card flickers" → task_add_bug
+- "what's on my list" → task_list
+- "show me my bugs" → task_list
+
+When NOT to emit task actions:
+- "fix this bug: card flickers" → this is a code task, the user wants it fixed NOW, not queued
+- "I have a bug" without context → ask what the bug is, don't create an empty task
+- User is discussing the task system itself ("how does the bug reporter work")
+
+Extract a clean, concise description from the user's message. Don't include meta-text like "add to the list" or "for later" in the description — just the actual bug or idea.
 
 ## Workflow: Plan Before Executing
 

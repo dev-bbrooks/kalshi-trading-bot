@@ -76,6 +76,15 @@ def _init_terminal_db():
                 created_at TEXT NOT NULL
             )
         """)
+        c.execute("""CREATE TABLE IF NOT EXISTS terminal_tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            type TEXT NOT NULL DEFAULT 'bug',
+            description TEXT NOT NULL,
+            context_json TEXT,
+            status TEXT NOT NULL DEFAULT 'open',
+            created_at TEXT NOT NULL,
+            resolved_at TEXT
+        )""")
 
 
 def _save_message(db_session_id, role, content, activity_log=None):
@@ -105,6 +114,141 @@ def _get_or_create_db_session(claude_session_id=None):
             VALUES (?, ?)
         """, (claude_session_id, now_utc()))
         return cur.lastrowid, claude_session_id
+
+
+# ── Task helpers ─────────────────────────────────────────────
+
+def _capture_task_context():
+    """Auto-capture current system state for bug reports."""
+    context = {}
+    try:
+        context["timestamp"] = now_utc()
+    except Exception:
+        from datetime import datetime, timezone
+        context["timestamp"] = datetime.now(timezone.utc).isoformat()
+
+    # Trading mode + observation count
+    try:
+        from db import get_config, get_conn as platform_conn
+        context["trading_mode"] = get_config("btc_15m.trading_mode") or "unknown"
+        with platform_conn() as c:
+            row = c.execute("SELECT COUNT(*) as n FROM btc15m_observations").fetchone()
+            context["observation_count"] = row["n"] if row else 0
+    except Exception:
+        pass
+
+    # Server uptime
+    try:
+        with open("/proc/uptime") as f:
+            uptime_s = float(f.read().split()[0])
+        days = int(uptime_s // 86400)
+        hours = int((uptime_s % 86400) // 3600)
+        context["uptime"] = f"{days}d {hours}h"
+    except Exception:
+        pass
+
+    # Recent error logs
+    try:
+        from db import get_conn as platform_conn
+        with platform_conn() as c:
+            rows = c.execute(
+                "SELECT message, created_at FROM log_entries WHERE level = 'ERROR' ORDER BY id DESC LIMIT 5"
+            ).fetchall()
+            context["recent_errors"] = [{"message": r["message"], "time": r["created_at"]} for r in rows]
+    except Exception:
+        pass
+
+    return context
+
+
+def _add_task(task_type, description, capture_context=True):
+    """Add a task to the queue. Returns the new task dict."""
+    context = _capture_task_context() if (capture_context and task_type == "bug") else None
+    created = now_utc()
+    try:
+        with get_conn() as c:
+            cur = c.execute(
+                "INSERT INTO terminal_tasks (type, description, context_json, status, created_at) VALUES (?, ?, ?, 'open', ?)",
+                (task_type, description, json.dumps(context) if context else None, created)
+            )
+            task_id = cur.lastrowid
+            return {"id": task_id, "type": task_type, "description": description, "status": "open", "created_at": created, "context": context}
+    except Exception as e:
+        print(f"[terminal] _add_task error: {e}", flush=True)
+        return None
+
+
+def _get_tasks(status="open", limit=20):
+    """Get tasks, newest first."""
+    try:
+        with get_conn() as c:
+            rows = c.execute(
+                "SELECT id, type, description, context_json, status, created_at, resolved_at FROM terminal_tasks WHERE status = ? ORDER BY id DESC LIMIT ?",
+                (status, limit)
+            ).fetchall()
+            tasks = []
+            for r in rows:
+                t = {"id": r["id"], "type": r["type"], "description": r["description"],
+                     "status": r["status"], "created_at": r["created_at"], "resolved_at": r["resolved_at"]}
+                if r["context_json"]:
+                    try:
+                        t["context"] = json.loads(r["context_json"])
+                    except Exception:
+                        pass
+                tasks.append(t)
+            return tasks
+    except Exception as e:
+        print(f"[terminal] _get_tasks error: {e}", flush=True)
+        return []
+
+
+def _get_task(task_id):
+    """Get a single task by ID."""
+    try:
+        with get_conn() as c:
+            r = c.execute(
+                "SELECT id, type, description, context_json, status, created_at, resolved_at FROM terminal_tasks WHERE id = ?",
+                (task_id,)
+            ).fetchone()
+            if not r:
+                return None
+            t = {"id": r["id"], "type": r["type"], "description": r["description"],
+                 "status": r["status"], "created_at": r["created_at"], "resolved_at": r["resolved_at"]}
+            if r["context_json"]:
+                try:
+                    t["context"] = json.loads(r["context_json"])
+                except Exception:
+                    pass
+            return t
+    except Exception as e:
+        print(f"[terminal] _get_task error: {e}", flush=True)
+        return None
+
+
+def _update_task_status(task_id, status):
+    """Update task status. Returns updated task or None."""
+    resolved = now_utc() if status in ("done", "dismissed") else None
+    try:
+        with get_conn() as c:
+            c.execute(
+                "UPDATE terminal_tasks SET status = ?, resolved_at = ? WHERE id = ?",
+                (status, resolved, task_id)
+            )
+            return _get_task(task_id)
+    except Exception as e:
+        print(f"[terminal] _update_task_status error: {e}", flush=True)
+        return None
+
+
+def _delete_task(task_id):
+    """Permanently delete a task."""
+    try:
+        with get_conn() as c:
+            c.execute("DELETE FROM terminal_tasks WHERE id = ?", (task_id,))
+            return True
+    except Exception as e:
+        print(f"[terminal] _delete_task error: {e}", flush=True)
+        return False
 
 
 # ── Active sessions ───────────────────────────────────────────
@@ -362,29 +506,40 @@ _CLAUDE_MD_PATH = "/opt/trading-platform/CLAUDE.md"
 
 _DIRECT_PATTERNS = {
     "git_status": [
-        re.compile(r"^(git\s+)?status$", re.I),
-        re.compile(r"what('s| has| hasn't| is).*\b(committed|pushed|changed|uncommitted|unpushed)\b", re.I),
-        re.compile(r"show\s+(me\s+)?(uncommitted|unpushed|changed|dirty|git)", re.I),
-        re.compile(r"any(thing)?\s+(to\s+)?(commit|push)", re.I),
+        re.compile(r"^(?:git\s+)?status$", re.I),
+        re.compile(r"what(?:'s| has| hasn't| is).*\b(?:committed|pushed|changed|uncommitted|unpushed)\b", re.I),
+        re.compile(r"show\s+(?:me\s+)?(?:uncommitted|unpushed|changed|dirty|git)", re.I),
+        re.compile(r"any(?:thing)?\s+(?:to\s+)?(?:commit|push)", re.I),
     ],
     "git_push": [
-        re.compile(r"^(git\s+)?push$", re.I),
-        re.compile(r"^push\s+(it|to\s+github|everything|changes)$", re.I),
+        re.compile(r"^(?:git\s+)?push$", re.I),
+        re.compile(r"^push\s+(?:it|to\s+github|everything|changes)$", re.I),
         re.compile(r"^commit\s+and\s+push$", re.I),
     ],
     "git_diff": [
-        re.compile(r"^(git\s+)?diff$", re.I),
-        re.compile(r"what('s| did).*change", re.I),
-        re.compile(r"show\s+(me\s+)?(the\s+)?diff", re.I),
+        re.compile(r"^(?:git\s+)?diff$", re.I),
+        re.compile(r"what(?:'s| did).*change", re.I),
+        re.compile(r"show\s+(?:me\s+)?(?:the\s+)?diff", re.I),
     ],
     "shell": [
         re.compile(r"^supervisorctl\s+", re.I),
         re.compile(r"^df\s+-h$", re.I),
         re.compile(r"^free\s+-m$", re.I),
         re.compile(r"^uptime$", re.I),
-        re.compile(r"^pip3?\s+(list|show|install)\b", re.I),
+        re.compile(r"^pip3?\s+(?:list|show|install)\b", re.I),
         re.compile(r"^python3?\s+--version$", re.I),
         re.compile(r"^cat\s+/etc/supervisor", re.I),
+    ],
+    "task_add_bug": [
+        re.compile(r"^bug:\s*(.+)", re.I | re.S),
+    ],
+    "task_add_idea": [
+        re.compile(r"^idea:\s*(.+)", re.I | re.S),
+    ],
+    "task_list": [
+        re.compile(r"^show\s+(?:me\s+)?(?:my\s+)?(?:bugs?|tasks?|ideas?|list|queue|backlog)$", re.I),
+        re.compile(r"^(?:bugs?|tasks?|ideas?|list|queue|backlog)$", re.I),
+        re.compile(r"what(?:'s| is)\s+(?:on\s+)?(?:the\s+)?(?:list|queue|backlog)", re.I),
     ],
 }
 
@@ -393,14 +548,22 @@ def _route_message(text):
     Returns (action, handler_name, payload) tuple.
     action: 'direct', 'enhance', or 'passthrough'
     """
+    if not text:
+        return ("enhance" if _enhancer_config["enabled"] else "passthrough", None, None)
     stripped = text.strip()
     # Empty or multi-line input is never a direct command
     if not stripped or '\n' in stripped:
         return ("enhance" if _enhancer_config["enabled"] else "passthrough", None, None)
     for handler_name, patterns in _DIRECT_PATTERNS.items():
         for pattern in patterns:
-            if pattern.search(stripped):
-                return ("direct", handler_name, {"raw_text": stripped})
+            m = pattern.search(stripped)
+            if m:
+                payload = {"raw_text": stripped}
+                if m.lastindex and m.lastindex >= 1:
+                    val = m.group(m.lastindex)
+                    if val:
+                        payload["extracted"] = val.strip()
+                return ("direct", handler_name, payload)
     # Not a direct action — let enhancer/passthrough logic decide
     return ("enhance" if _enhancer_config["enabled"] else "passthrough", None, None)
 
@@ -540,6 +703,7 @@ OPTION 3 — PASSTHROUGH: If the message is any of these, output ONLY this tag:
 - A short follow-up where the reference is already clear ("make the font bigger" after just discussing fonts)
 - Widget or action requests — anything where the user wants to see, inspect, or trigger something rather than write code (styling widgets, git status, system info, data summaries, "show me the header styles", "what's the git status", "anything to push")
 - Messages starting with [DESIGN_APPLY] — auto-generated from the design widget
+- Task/bug/idea logging — when the user wants to save something for later rather than act on it now ("bug: card flickers", "add this to the list", "idea for later: ...")
 - Anything you're uncertain about — when in doubt, passthrough
 
 RULES FOR ENHANCED PROMPTS:
@@ -696,11 +860,12 @@ class ClaudeCodeSession:
             return user_text, False
 
     def _emit_widget(self, widget_type, data):
-        """Emit a widget response using delimiter-based encoding (like design widgets)."""
-        widget_json = json.dumps({"type": widget_type, "data": data})
+        """Emit a widget response. Sends widget as both a separate field and text-encoded fallback."""
+        widget_obj = {"type": widget_type, "data": data}
+        widget_json = json.dumps(widget_obj)
         text = f"__WIDGET__{widget_json}__/WIDGET__"
-        print(f"[router] emitting widget text len={len(text)}: {text[:120]}", flush=True)
-        self._safe_emit("claude_response", {"text": text})
+        print(f"[router] emitting widget type={widget_type} len={len(text)}", flush=True)
+        self._safe_emit("claude_response", {"text": text, "widget": widget_obj})
 
     def _handle_direct(self, handler_name, payload):
         """Dispatch to the appropriate direct handler."""
@@ -709,20 +874,27 @@ class ClaudeCodeSession:
             "git_push": self._direct_git_push,
             "git_diff": self._direct_git_diff,
             "shell": self._direct_shell,
+            "task_add_bug": self._direct_task_add,
+            "task_add_idea": self._direct_task_add,
+            "task_list": self._direct_task_list,
+            "task_detail": self._direct_task_detail,
+            "task_done": self._direct_task_update,
+            "task_dismiss": self._direct_task_update,
+            "task_delete": self._direct_task_delete,
         }
         fn = handlers.get(handler_name)
         if fn:
-            fn(payload)
+            fn(handler_name, payload)
         else:
             self._safe_emit("claude_error", {"text": f"Unknown handler: {handler_name}"})
 
-    def _direct_git_status(self, payload):
+    def _direct_git_status(self, handler_name, payload):
         """Handle git status request — emit git widget."""
         self._safe_emit("claude_status", {"type": "direct", "text": "Checking git status..."})
         data = _git_status_data()
         self._emit_widget("git_status", data)
 
-    def _direct_git_push(self, payload):
+    def _direct_git_push(self, handler_name, payload):
         """Handle git push — commit all + push."""
         self._safe_emit("claude_status", {"type": "direct", "text": "Pushing to GitHub..."})
 
@@ -782,7 +954,7 @@ class ClaudeCodeSession:
             "pushed_to": "origin/main",
         })
 
-    def _direct_git_diff(self, payload):
+    def _direct_git_diff(self, handler_name, payload):
         """Show compact diff."""
         self._safe_emit("claude_status", {"type": "direct", "text": "Getting diff..."})
         _, diff_output, _ = _run_git(["diff", "--stat"])
@@ -792,7 +964,7 @@ class ClaudeCodeSession:
             combined = "No changes."
         self._safe_emit("claude_response", {"text": combined})
 
-    def _direct_shell(self, payload):
+    def _direct_shell(self, handler_name, payload):
         """Run an allowed shell command directly."""
         cmd = payload.get("raw_text", "")
         self._safe_emit("claude_status", {"type": "direct", "text": f"Running: {cmd}"})
@@ -803,7 +975,62 @@ class ClaudeCodeSession:
         except Exception as e:
             self._safe_emit("claude_error", {"text": f"Command failed: {e}"})
 
+    def _direct_task_add(self, handler_name, payload):
+        """Add a bug or idea to the task queue."""
+        task_type = "idea" if "idea" in handler_name else "bug"
+        description = payload.get("extracted") or payload.get("description") or payload.get("raw_text", "")
+        if not description:
+            self._safe_emit("claude_error", {"text": "No description provided"})
+            return
+        task = _add_task(task_type, description)
+        if task:
+            self._emit_widget("task_added", task)
+        else:
+            self._safe_emit("claude_error", {"text": "Failed to save task"})
+
+    def _direct_task_list(self, handler_name, payload):
+        """Show the task queue."""
+        tasks = _get_tasks(status="open")
+        self._emit_widget("task_list", {"tasks": tasks, "count": len(tasks)})
+
+    def _direct_task_detail(self, handler_name, payload):
+        """Show details for a specific task."""
+        task_id = payload.get("id")
+        if not task_id:
+            self._safe_emit("claude_error", {"text": "No task ID"})
+            return
+        task = _get_task(task_id)
+        if task:
+            self._emit_widget("task_detail", task)
+        else:
+            self._safe_emit("claude_error", {"text": f"Task {task_id} not found"})
+
+    def _direct_task_update(self, handler_name, payload):
+        """Mark task done or dismissed."""
+        task_id = payload.get("id")
+        new_status = "done" if "done" in handler_name else "dismissed"
+        if not task_id:
+            self._safe_emit("claude_error", {"text": "No task ID"})
+            return
+        task = _update_task_status(task_id, new_status)
+        if task:
+            self._emit_widget("task_updated", task)
+        else:
+            self._safe_emit("claude_error", {"text": f"Failed to update task {task_id}"})
+
+    def _direct_task_delete(self, handler_name, payload):
+        """Permanently delete a task."""
+        task_id = payload.get("id")
+        if not task_id:
+            self._safe_emit("claude_error", {"text": "No task ID"})
+            return
+        if _delete_task(task_id):
+            self._emit_widget("task_deleted", {"id": task_id})
+        else:
+            self._safe_emit("claude_error", {"text": f"Failed to delete task {task_id}"})
+
     def send_prompt(self, text, enhance=False):
+        print(f"[send_prompt] text={text!r}, busy={self.busy}, enhance={enhance}", flush=True)
         if self.busy:
             self._safe_emit("claude_error", {"text": "Still processing"})
             return
@@ -835,20 +1062,28 @@ class ClaudeCodeSession:
 
     def _execute_prompt(self, text, enhance=False):
         """Background task: router, enhancer, process spawn, output reading."""
-        # Ensure we have a db session (create on first prompt)
-        if not self.db_session_id:
-            self.db_session_id, stored_claude_id = _get_or_create_db_session(self.claude_session_id)
-            if not self.claude_session_id and stored_claude_id:
-                self.claude_session_id = stored_claude_id
+        try:
+            # Ensure we have a db session (create on first prompt)
+            if not self.db_session_id:
+                self.db_session_id, stored_claude_id = _get_or_create_db_session(self.claude_session_id)
+                if not self.claude_session_id and stored_claude_id:
+                    self.claude_session_id = stored_claude_id
 
-        # Save original user message
-        _save_message(self.db_session_id, "user", text)
+            # Save original user message
+            _save_message(self.db_session_id, "user", text)
 
-        # ── Router (always runs, both send modes) ──
-        action, handler_name, route_payload = _route_message(text)
+            # ── Router (always runs, both send modes) ──
+            action, handler_name, route_payload = _route_message(text)
+            print(f"[router] text={text!r} -> action={action}, handler={handler_name}", flush=True)
 
-        if action == "direct":
-            self._handle_direct(handler_name, route_payload)
+            if action == "direct":
+                self._handle_direct(handler_name, route_payload)
+                self.busy = False
+                self._emit_state("ready")
+                return
+        except Exception as e:
+            print(f"[router] EXCEPTION in _execute_prompt early path: {e}", flush=True)
+            self._safe_emit("claude_error", {"text": f"Router error: {e}"})
             self.busy = False
             self._emit_state("ready")
             return
@@ -1084,16 +1319,22 @@ class ClaudeCodeSession:
         # A real direct action intent means Claude emits ONLY the marker immediately.
         da_marker = '<!--DIRECT_ACTION:'
         if da_marker in response:
-            da_match = re.search(r'<!--DIRECT_ACTION:(\w+)-->', response)
+            da_match = re.search(r'<!--DIRECT_ACTION:(\w+)(?:\|(.+?))?-->', response)
             if da_match:
                 action_name = da_match.group(1)
+                da_payload = {"raw_text": ""}
+                if da_match.group(2):
+                    try:
+                        da_payload = json.loads(da_match.group(2))
+                    except (json.JSONDecodeError, Exception):
+                        pass
                 if _had_tool_use or _dbg_text_blocks > 1:
                     print(f"[debug] DIRECT_ACTION '{action_name}' ignored: tool_use={_had_tool_use}, text_blocks={_dbg_text_blocks}", flush=True)
                     # Strip the marker from the response and show it as normal text
-                    response = re.sub(r'<!--DIRECT_ACTION:\w+-->\s*', '', response).strip()
+                    response = re.sub(r'<!--DIRECT_ACTION:\w+(?:\|.+?)?-->\s*', '', response).strip()
                 else:
                     print(f"[debug] DIRECT_ACTION detected: {action_name}", flush=True)
-                    self._handle_direct(action_name, {"raw_text": ""})
+                    self._handle_direct(action_name, da_payload)
                     _save_message(self.db_session_id, "assistant", f"[direct action: {action_name}]", self.current_activities)
                     self.busy = False
                     self.process = None
@@ -1310,11 +1551,19 @@ def ws_direct_action(data):
         _claude_session["session"] = s
 
     action = data.get("action", "") if isinstance(data, dict) else ""
+    args = data.get("args", {}) if isinstance(data, dict) else {}
     s.sid = request.sid  # ensure emits go to this client
 
-    if action == "git_push":
-        s._safe_emit("claude_status", {"type": "direct", "text": "Pushing..."})
-        s._direct_git_push(data.get("args", {}))
+    action_map = {
+        "git_push": "git_push",
+        "task_detail": "task_detail",
+        "task_done": "task_done",
+        "task_dismiss": "task_dismiss",
+        "task_delete": "task_delete",
+    }
+    handler_name = action_map.get(action)
+    if handler_name:
+        s._handle_direct(handler_name, args)
     else:
         emit("claude_error", {"text": f"Unknown action: {action}"})
 

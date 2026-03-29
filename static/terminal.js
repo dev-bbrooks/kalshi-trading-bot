@@ -1132,9 +1132,19 @@ function _termInit() {
     if (wi !== -1) {
       var we = (raw || text).indexOf(wEnd, wi);
       if (we !== -1) {
-        var wp = JSON.parse((raw || text).substring(wi + wStart.length, we).trim());
-        _renderWidget(wp);
-        return;
+        try {
+          var wpStr = (raw || text).substring(wi + wStart.length, we).trim();
+          var wp = JSON.parse(wpStr);
+          _renderWidget(wp);
+          return;
+        } catch(e) {
+          var errD = document.createElement('div');
+          errD.style.cssText = 'padding:8px 12px;margin:4px 12px;background:#1a1a2e;border:2px solid #f85149;border-radius:8px;color:#f85149;font-size:11px;font-family:monospace;word-break:break-all;';
+          errD.textContent = 'Widget parse error: ' + e.message + ' | JSON: ' + wpStr.substring(0, 200);
+          _tconv.appendChild(errD);
+          _tScrollBot();
+          return;
+        }
       }
     }
     // Check for design widget payload
@@ -1210,6 +1220,11 @@ function _termInit() {
     var renderers = {
       'git_status': _renderGitStatus,
       'git_push_result': _renderGitPushResult,
+      'task_added': _renderTaskAdded,
+      'task_list': _renderTaskList,
+      'task_detail': _renderTaskDetail,
+      'task_updated': _renderTaskUpdated,
+      'task_deleted': _renderTaskDeleted,
     };
     var fn = renderers[widget.type];
     if (fn) {
@@ -1404,6 +1419,245 @@ function _termInit() {
     _tScrollBot();
   }
 
+  // ── Task Widget Renderers ──
+
+  function _taskAge(isoStr) {
+    if (!isoStr) return '';
+    try {
+      var then = new Date(isoStr);
+      var now = new Date();
+      var diffMs = now - then;
+      var mins = Math.floor(diffMs / 60000);
+      if (mins < 1) return 'just now';
+      if (mins < 60) return mins + 'm';
+      var hrs = Math.floor(mins / 60);
+      if (hrs < 24) return hrs + 'h';
+      var days = Math.floor(hrs / 24);
+      return days + 'd';
+    } catch(e) { return ''; }
+  }
+
+  function _renderTaskAdded(data) {
+    var card = document.createElement('div');
+    card.style.cssText = 'align-self:flex-start;max-width:88%;width:100%;margin:4px 0;background:#161b22;border:1px solid #30363d;border-radius:12px;border-bottom-left-radius:4px;overflow:visible;';
+    card.setAttribute('data-widget', 'task_added');
+
+    var body = document.createElement('div');
+    body.style.cssText = 'display:flex;align-items:center;gap:10px;padding:12px 14px;';
+
+    var badge = document.createElement('span');
+    var isBug = data.type === 'bug';
+    badge.style.cssText = 'font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;padding:2px 6px;border-radius:4px;flex-shrink:0;' + (isBug ? 'background:rgba(248,81,73,0.15);color:#f85149;' : 'background:rgba(88,166,255,0.15);color:#58a6ff;');
+    badge.textContent = isBug ? 'Bug' : 'Idea';
+    body.appendChild(badge);
+
+    var desc = document.createElement('span');
+    desc.style.cssText = 'font-size:13px;color:#c9d1d9;';
+    desc.textContent = data.description;
+    body.appendChild(desc);
+
+    card.appendChild(body);
+    _tconv.appendChild(card);
+    _tScrollBot();
+  }
+
+  function _renderTaskList(data) {
+    var card = document.createElement('div');
+    card.style.cssText = 'align-self:flex-start;max-width:88%;width:100%;margin:4px 0;background:#161b22;border:1px solid #30363d;border-radius:12px;border-bottom-left-radius:4px;overflow:visible;';
+    card.setAttribute('data-widget', 'task_list');
+
+    // Header
+    var header = document.createElement('div');
+    header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-bottom:1px solid #30363d;';
+    var title = document.createElement('span');
+    title.style.cssText = 'font-size:14px;font-weight:600;color:#c9d1d9;';
+    title.textContent = 'Tasks';
+    header.appendChild(title);
+    var countEl = document.createElement('span');
+    countEl.style.cssText = 'font-size:12px;color:#8b949e;';
+    countEl.textContent = data.count + ' open';
+    header.appendChild(countEl);
+    card.appendChild(header);
+
+    if (!data.tasks || data.tasks.length === 0) {
+      var empty = document.createElement('div');
+      empty.style.cssText = 'padding:20px 14px;color:#8b949e;font-size:13px;text-align:center;';
+      empty.textContent = 'No open tasks.';
+      card.appendChild(empty);
+    } else {
+      var list = document.createElement('div');
+      list.style.cssText = 'padding:4px 0;';
+      for (var i = 0; i < data.tasks.length; i++) {
+        (function(task) {
+          var row = document.createElement('div');
+          row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;-webkit-tap-highlight-color:transparent;' + (i > 0 ? 'border-top:1px solid #30363d;' : '');
+          row.addEventListener('click', function() {
+            _ts.emit('direct_action', { action: 'task_detail', args: { id: task.id } });
+          });
+
+          var badge = document.createElement('span');
+          var isBug = task.type === 'bug';
+          badge.style.cssText = 'font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;padding:2px 6px;border-radius:4px;flex-shrink:0;' + (isBug ? 'background:rgba(248,81,73,0.15);color:#f85149;' : 'background:rgba(88,166,255,0.15);color:#58a6ff;');
+          badge.textContent = isBug ? 'Bug' : 'Idea';
+          row.appendChild(badge);
+
+          var desc = document.createElement('span');
+          desc.style.cssText = 'font-size:13px;color:#c9d1d9;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+          desc.textContent = task.description;
+          row.appendChild(desc);
+
+          var age = document.createElement('span');
+          age.style.cssText = 'font-size:11px;color:#8b949e;flex-shrink:0;';
+          age.textContent = _taskAge(task.created_at);
+          row.appendChild(age);
+
+          list.appendChild(row);
+        })(data.tasks[i]);
+      }
+      card.appendChild(list);
+    }
+
+    _tconv.appendChild(card);
+    _tScrollBot();
+  }
+
+  function _renderTaskDetail(data) {
+    var card = document.createElement('div');
+    card.style.cssText = 'align-self:flex-start;max-width:88%;width:100%;margin:4px 0;background:#161b22;border:1px solid #30363d;border-radius:12px;border-bottom-left-radius:4px;overflow:visible;';
+    card.setAttribute('data-widget', 'task_detail');
+
+    // Header
+    var header = document.createElement('div');
+    header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-bottom:1px solid #30363d;';
+    var badge = document.createElement('span');
+    var isBug = data.type === 'bug';
+    badge.style.cssText = 'font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;padding:2px 6px;border-radius:4px;flex-shrink:0;' + (isBug ? 'background:rgba(248,81,73,0.15);color:#f85149;' : 'background:rgba(88,166,255,0.15);color:#58a6ff;');
+    badge.textContent = isBug ? 'Bug' : 'Idea';
+    header.appendChild(badge);
+    var idEl = document.createElement('span');
+    idEl.style.cssText = "font-size:12px;color:#8b949e;font-family:'SF Mono',Menlo,Monaco,monospace;";
+    idEl.textContent = '#' + data.id;
+    header.appendChild(idEl);
+    card.appendChild(header);
+
+    // Description
+    var descEl = document.createElement('div');
+    descEl.style.cssText = 'padding:12px 14px;font-size:14px;color:#c9d1d9;line-height:1.5;';
+    descEl.textContent = data.description;
+    card.appendChild(descEl);
+
+    // Context
+    if (data.context) {
+      var ctx = document.createElement('div');
+      ctx.style.cssText = 'padding:10px 14px;border-top:1px solid #30363d;';
+      var ctxLabel = document.createElement('div');
+      ctxLabel.style.cssText = 'font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.3px;color:#8b949e;margin-bottom:6px;';
+      ctxLabel.textContent = 'Captured Context';
+      ctx.appendChild(ctxLabel);
+
+      var ctxItems = [];
+      if (data.context.trading_mode) ctxItems.push('Mode: ' + data.context.trading_mode);
+      if (data.context.observation_count !== undefined) ctxItems.push('Observations: ' + data.context.observation_count);
+      if (data.context.uptime) ctxItems.push('Uptime: ' + data.context.uptime);
+      if (data.context.timestamp) ctxItems.push('Captured: ' + _taskAge(data.context.timestamp) + ' ago');
+
+      for (var ci = 0; ci < ctxItems.length; ci++) {
+        var ctxRow = document.createElement('div');
+        ctxRow.style.cssText = "font-size:12px;color:#8b949e;padding:2px 0;font-family:'SF Mono',Menlo,Monaco,monospace;";
+        ctxRow.textContent = ctxItems[ci];
+        ctx.appendChild(ctxRow);
+      }
+
+      if (data.context.recent_errors && data.context.recent_errors.length > 0) {
+        var errLabel = document.createElement('div');
+        errLabel.style.cssText = 'font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.3px;color:#8b949e;margin-top:8px;margin-bottom:6px;';
+        errLabel.textContent = 'Recent Errors';
+        ctx.appendChild(errLabel);
+        for (var ei = 0; ei < data.context.recent_errors.length; ei++) {
+          var errRow = document.createElement('div');
+          errRow.style.cssText = "font-size:11px;color:#f85149;padding:2px 0;font-family:'SF Mono',Menlo,Monaco,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
+          errRow.textContent = data.context.recent_errors[ei].message;
+          ctx.appendChild(errRow);
+        }
+      }
+      card.appendChild(ctx);
+    }
+
+    // Actions
+    var actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;gap:8px;padding:10px 14px;border-top:1px solid #30363d;';
+    var btnBase = 'padding:8px 14px;border-radius:8px;border:1px solid #30363d;background:transparent;font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;';
+
+    var fixBtn = document.createElement('button');
+    fixBtn.style.cssText = btnBase + 'flex:1;background:rgba(88,166,255,0.12);border-color:rgba(88,166,255,0.4);color:#58a6ff;';
+    fixBtn.textContent = 'Fix This';
+    fixBtn.addEventListener('click', function() {
+      var prompt = (data.type === 'bug' ? 'Fix this bug' : 'Build this') + ':\n' + data.description;
+      if (data.context) {
+        prompt += '\n\nContext captured at ' + (data.context.timestamp || 'unknown') + ':';
+        if (data.context.trading_mode) prompt += '\n- Trading mode: ' + data.context.trading_mode;
+        if (data.context.observation_count !== undefined) prompt += '\n- Observations: ' + data.context.observation_count;
+        if (data.context.recent_errors && data.context.recent_errors.length > 0) {
+          prompt += '\n- Recent errors:';
+          for (var ri = 0; ri < data.context.recent_errors.length; ri++) {
+            prompt += '\n  ' + data.context.recent_errors[ri].message;
+          }
+        }
+      }
+      var input = document.querySelector('.header-textbox');
+      if (input) { input.value = prompt; input.focus(); input.dispatchEvent(new Event('input', { bubbles: true })); }
+    });
+    actions.appendChild(fixBtn);
+
+    var doneBtn = document.createElement('button');
+    doneBtn.style.cssText = btnBase + 'background:rgba(63,185,80,0.12);border-color:rgba(63,185,80,0.4);color:#3fb950;';
+    doneBtn.textContent = 'Done';
+    doneBtn.addEventListener('click', function() { doneBtn.disabled = true; _ts.emit('direct_action', { action: 'task_done', args: { id: data.id } }); });
+    actions.appendChild(doneBtn);
+
+    var dismissBtn = document.createElement('button');
+    dismissBtn.style.cssText = btnBase + 'color:#8b949e;';
+    dismissBtn.textContent = 'Dismiss';
+    dismissBtn.addEventListener('click', function() { dismissBtn.disabled = true; _ts.emit('direct_action', { action: 'task_dismiss', args: { id: data.id } }); });
+    actions.appendChild(dismissBtn);
+
+    var deleteBtn = document.createElement('button');
+    deleteBtn.style.cssText = btnBase + 'width:36px;display:flex;align-items:center;justify-content:center;padding:8px;color:#8b949e;';
+    deleteBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>';
+    deleteBtn.addEventListener('click', function() { deleteBtn.disabled = true; _ts.emit('direct_action', { action: 'task_delete', args: { id: data.id } }); });
+    actions.appendChild(deleteBtn);
+
+    card.appendChild(actions);
+    _tconv.appendChild(card);
+    _tScrollBot();
+  }
+
+  function _renderTaskUpdated(data) {
+    var card = document.createElement('div');
+    card.style.cssText = 'align-self:flex-start;max-width:88%;width:100%;margin:4px 0;background:#161b22;border:1px solid #30363d;border-radius:12px;border-bottom-left-radius:4px;overflow:visible;';
+    var body = document.createElement('div');
+    body.style.cssText = 'display:flex;align-items:center;gap:8px;padding:12px 14px;font-size:13px;color:#8b949e;';
+    var icon = data.status === 'done'
+      ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3fb950" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>'
+      : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8b949e" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+    var label = data.status === 'done' ? 'Done' : 'Dismissed';
+    body.innerHTML = icon + ' <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + label + ': ' + (data.description || '#' + data.id) + '</span>';
+    card.appendChild(body);
+    _tconv.appendChild(card);
+    _tScrollBot();
+  }
+
+  function _renderTaskDeleted(data) {
+    var card = document.createElement('div');
+    card.style.cssText = 'align-self:flex-start;max-width:88%;width:100%;margin:4px 0;background:#161b22;border:1px solid #30363d;border-radius:12px;border-bottom-left-radius:4px;overflow:visible;';
+    var body = document.createElement('div');
+    body.style.cssText = 'display:flex;align-items:center;gap:8px;padding:12px 14px;font-size:13px;color:#8b949e;';
+    body.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f85149" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg> <span>Task #' + data.id + ' deleted</span>';
+    card.appendChild(body);
+    _tconv.appendChild(card);
+    _tScrollBot();
+  }
+
   // Claude WebSocket events
   _ts.on('claude_state', function(d) {
     if (d.state === 'ready') { if (_tState === 'busy') _tCollapseAct(); _tSetState('ready'); }
@@ -1422,8 +1676,12 @@ function _termInit() {
   });
   _ts.on('claude_response', function(d) {
     _tCollapseAct(); if (d.id) _tCsSid = d.id;
-    console.log('[CR] text len=' + (d.text||'').length + ' first80=' + (d.text||'').substring(0,80));
-    _tAddAsst(d.text, d.text); _tRendered++;
+    if (d.widget) {
+      _renderWidget(d.widget);
+    } else {
+      _tAddAsst(d.text, d.text);
+    }
+    _tRendered++;
   });
   _ts.on('claude_error', function(d) { _tCollapseAct(); _tAddErr(d.text + (d.detail ? ': ' + d.detail : ''), true); _tRendered++;
     if (_tState === 'busy') _tSetState('dead'); });
