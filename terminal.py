@@ -139,10 +139,17 @@ def health():
     return jsonify({"status": "ok"})
 
 
-@app.route("/terminal/api/model", methods=["GET"])
+@app.route("/terminal/api/model", methods=["GET", "POST"])
 def api_model():
     if not _is_authenticated():
         return jsonify({"error": "unauthorized"}), 401
+    if request.method == "POST":
+        data = request.get_json(silent=True) or {}
+        new_model = data.get("model") or "sonnet"
+        if new_model not in ("sonnet", "opus"):
+            return jsonify({"error": "invalid model"}), 400
+        _claude_model["model"] = new_model
+        return jsonify({"model": _claude_model["model"]})
     return jsonify({"model": _claude_model["model"]})
 
 
@@ -414,6 +421,16 @@ OPTION 3 — PASSTHROUGH: If the message is any of these, output ONLY this tag:
 - A short follow-up where the reference is already clear ("make the font bigger" after just discussing fonts)
 - Anything you're uncertain about — when in doubt, passthrough
 
+PASSTHROUGH — styling/design widget requests:
+If the user is asking to see, adjust, or tweak visual styles on a UI element, output <PASSTHROUGH/>. These requests need to reach Claude Code exactly as written so it can emit a design widget. Examples:
+- "show me the header styles"
+- "let me adjust the card colors"
+- "add blur and shadow to the widget"
+- "I wanted to see the styling widget"
+- "what can I change on the sidebar"
+
+Also PASSTHROUGH any message that starts with [DESIGN_APPLY] — these are auto-generated surgical edit instructions from the design widget.
+
 RULES FOR ENHANCED PROMPTS:
 - Start with a clear one-line summary of the task
 - List which files to read first (use full paths under /opt/trading-platform/)
@@ -567,7 +584,7 @@ class ClaudeCodeSession:
             print(f"[enhancer] Error: {e}", flush=True)
             return user_text, False
 
-    def send_prompt(self, text):
+    def send_prompt(self, text, enhance=False):
         if self.busy:
             self._safe_emit("claude_error", {"text": "Still processing"})
             return
@@ -577,9 +594,9 @@ class ClaudeCodeSession:
         self.prompt_count += 1
 
         # Run everything else in a background task so it survives disconnects
-        self.sio.start_background_task(self._execute_prompt, text)
+        self.sio.start_background_task(self._execute_prompt, text, enhance)
 
-    def _execute_prompt(self, text):
+    def _execute_prompt(self, text, enhance=False):
         """Background task: enhancer, process spawn, output reading."""
         claude_path = _find_claude()
         if not claude_path:
@@ -600,7 +617,7 @@ class ClaudeCodeSession:
 
         # ── Prompt enhancer ──
         actual_prompt = text
-        if _enhancer_config["enabled"]:
+        if enhance:
             self._safe_emit("claude_status", {"type": "enhancer", "text": "Enhancing prompt..."})
             enhanced_text, was_enhanced = self._run_enhancer(text)
             if was_enhanced:
@@ -776,7 +793,13 @@ class ClaudeCodeSession:
                     print(f"[debug] RESULT: has_text={bool(result_text)}, len={len(result_text)}, session_id={sid}", flush=True)
                     print(f"[debug] RESULT TEXT: {result_text[:100]}", flush=True)
                     if result_text:
-                        response_parts = [result_text]
+                        # Preserve text block if it contains a design widget payload
+                        # (result_text is often a plain summary that strips the widget JSON)
+                        current_text = response_parts[0] if response_parts else ""
+                        if "<!--DESIGN_WIDGET-->" in current_text and "<!--DESIGN_WIDGET-->" not in result_text:
+                            print(f"[debug] PRESERVING text block with DESIGN_WIDGET (result would overwrite)", flush=True)
+                        else:
+                            response_parts = [result_text]
 
         except Exception as e:
             print(f"[debug] READ EXCEPTION: {e}", flush=True)
@@ -981,8 +1004,9 @@ def ws_claude_prompt(data):
     s = _claude_session["session"]
     if s and s.sid == request.sid:
         text = data if isinstance(data, str) else data.get("text", "")
+        enhance = data.get("enhance", False) if isinstance(data, dict) else False
         if text:
-            s.send_prompt(text)
+            s.send_prompt(text, enhance=enhance)
     else:
         emit("claude_error", {"text": "No active Claude Code session"})
 
@@ -991,6 +1015,15 @@ def ws_claude_stop():
     s = _claude_session["session"]
     if s and s.sid == request.sid:
         _cleanup_claude()
+
+
+@socketio.on("style_override", namespace="/terminal/ws")
+def ws_style_override(data):
+    emit("style_override", data, broadcast=True)
+
+@socketio.on("style_override_clear", namespace="/terminal/ws")
+def ws_style_override_clear(data):
+    emit("style_override_clear", data, broadcast=True)
 
 
 # ── Main ──────────────────────────────────────────────────────
