@@ -1231,6 +1231,7 @@ function _termInit() {
     var mono = "'SF Mono',Menlo,Monaco,monospace";
     var card = document.createElement('div');
     card.style.cssText = 'align-self:flex-start;max-width:88%;width:100%;margin:4px 0;background:#161b22;border:1px solid #30363d;border-radius:12px;border-bottom-left-radius:4px;overflow:visible;';
+    card.setAttribute('data-widget', 'git_status');
 
     // Header
     var header = document.createElement('div');
@@ -1326,17 +1327,24 @@ function _termInit() {
   }
 
   function _renderGitPushResult(data) {
-    var card = document.createElement('div');
-    card.style.cssText = 'align-self:flex-start;max-width:88%;width:100%;margin:4px 0;background:#161b22;border:1px solid #30363d;border-radius:12px;border-bottom-left-radius:4px;overflow:visible;';
+    // Find the existing git status card and update it in-place
+    var existing = _tconv.querySelector('[data-widget="git_status"]');
+    if (!existing) {
+      // Fallback: render as standalone message
+      var msg = data.success ? ('Pushed: ' + (data.commit_hash || '') + ' ' + (data.commit_message || '')) : ('Push failed: ' + (data.message || ''));
+      _tAddAsst(msg);
+      return;
+    }
 
-    var header = document.createElement('div');
-    header.style.cssText = 'display:flex;align-items:center;padding:12px 14px;border-bottom:1px solid #30363d;';
-    var title = document.createElement('span');
-    title.style.cssText = 'font-size:14px;font-weight:600;color:#c9d1d9;';
-    title.textContent = data.success ? 'Pushed' : 'Push Failed';
-    header.appendChild(title);
-    card.appendChild(header);
+    // Remove everything after the header (file list, unpushed commits, push button)
+    var header = existing.children[0];
+    while (existing.children.length > 1) existing.removeChild(existing.lastChild);
 
+    // Update header title
+    var titleEl = header.querySelector('span');
+    if (titleEl) titleEl.textContent = data.success ? 'Pushed to GitHub' : 'Push Failed';
+
+    // Build result body
     var body = document.createElement('div');
     body.style.cssText = 'padding:14px;font-size:13px;display:flex;align-items:flex-start;gap:8px;line-height:1.5;';
 
@@ -1345,17 +1353,16 @@ function _termInit() {
       body.style.color = '#3fb950';
     } else if (data.success) {
       var info = '';
-      if (data.commit_hash) info += data.commit_hash + ' — ' + (data.commit_message || '');
+      if (data.commit_hash) info += '<span style="color:#58a6ff">' + data.commit_hash + '</span> — ' + (data.commit_message || '');
       if (data.files && data.files.length > 0) info += (info ? '<br>' : '') + data.files.length + ' file' + (data.files.length > 1 ? 's' : '') + ' pushed';
       body.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3fb950" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg> ' + info;
       body.style.color = '#3fb950';
     } else {
-      body.textContent = data.message || 'Push failed.';
+      body.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f85149" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg> ' + (data.message || 'Push failed.');
       body.style.color = '#f85149';
     }
 
-    card.appendChild(body);
-    _tconv.appendChild(card);
+    existing.appendChild(body);
     _tScrollBot();
   }
 
