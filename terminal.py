@@ -394,6 +394,9 @@ def _route_message(text):
     action: 'direct', 'enhance', or 'passthrough'
     """
     stripped = text.strip()
+    # Empty or multi-line input is never a direct command
+    if not stripped or '\n' in stripped:
+        return ("enhance" if _enhancer_config["enabled"] else "passthrough", None, None)
     for handler_name, patterns in _DIRECT_PATTERNS.items():
         for pattern in patterns:
             if pattern.search(stripped):
@@ -535,17 +538,9 @@ OPTION 3 — PASSTHROUGH: If the message is any of these, output ONLY this tag:
 - Conversational (greetings, "how's it going", status questions, "what did you change")
 - A direct instruction that's already specific enough ("change X to Y in file Z")
 - A short follow-up where the reference is already clear ("make the font bigger" after just discussing fonts)
+- Widget or action requests — anything where the user wants to see, inspect, or trigger something rather than write code (styling widgets, git status, system info, data summaries, "show me the header styles", "what's the git status", "anything to push")
+- Messages starting with [DESIGN_APPLY] — auto-generated from the design widget
 - Anything you're uncertain about — when in doubt, passthrough
-
-PASSTHROUGH — styling/design widget requests:
-If the user is asking to see, adjust, or tweak visual styles on a UI element, output <PASSTHROUGH/>. These requests need to reach Claude Code exactly as written so it can emit a design widget. Examples:
-- "show me the header styles"
-- "let me adjust the card colors"
-- "add blur and shadow to the widget"
-- "I wanted to see the styling widget"
-- "what can I change on the sidebar"
-
-Also PASSTHROUGH any message that starts with [DESIGN_APPLY] — these are auto-generated surgical edit instructions from the design widget.
 
 RULES FOR ENHANCED PROMPTS:
 - Start with a clear one-line summary of the task
@@ -820,16 +815,26 @@ class ClaudeCodeSession:
         # Run everything else in a background task so it survives disconnects
         self.sio.start_background_task(self._execute_prompt, text, enhance)
 
-    def _execute_prompt(self, text, enhance=False):
-        """Background task: enhancer, process spawn, output reading."""
-        claude_path = _find_claude()
-        if not claude_path:
-            self._safe_emit("claude_error",
-                            {"text": "Claude Code not found", "detail": "Binary not in PATH"})
-            self.busy = False
-            self._emit_state("ready")
-            return
+    @staticmethod
+    def _is_discussion(text):
+        """Return True if the message is asking about a feature rather than requesting an action."""
+        patterns = [
+            r'\btell me about\b',
+            r'\bexplain\b',
+            r'\bhow does\b',
+            r'\bdescribe\b',
+            r'\bwhat is the\b',
+            r'\bhow do\b',
+            r'\bwhy does\b',
+            r'\bhow did\b',
+            r'\bwhen does\b',
+            r'\babout the\b',
+        ]
+        lower = text.lower()
+        return any(re.search(p, lower) for p in patterns)
 
+    def _execute_prompt(self, text, enhance=False):
+        """Background task: router, enhancer, process spawn, output reading."""
         # Ensure we have a db session (create on first prompt)
         if not self.db_session_id:
             self.db_session_id, stored_claude_id = _get_or_create_db_session(self.claude_session_id)
@@ -839,7 +844,7 @@ class ClaudeCodeSession:
         # Save original user message
         _save_message(self.db_session_id, "user", text)
 
-        # ── Router (always runs) ──
+        # ── Router (always runs, both send modes) ──
         action, handler_name, route_payload = _route_message(text)
 
         if action == "direct":
@@ -848,9 +853,18 @@ class ClaudeCodeSession:
             self._emit_state("ready")
             return
 
-        # ── Prompt enhancer ──
+        # ── Claude Code needed from here on ──
+        claude_path = _find_claude()
+        if not claude_path:
+            self._safe_emit("claude_error",
+                            {"text": "Claude Code not found", "detail": "Binary not in PATH"})
+            self.busy = False
+            self._emit_state("ready")
+            return
+
+        # ── Prompt enhancer (only if enhance=True AND enabled) ──
         actual_prompt = text
-        if enhance:
+        if enhance and _enhancer_config["enabled"]:
             self._safe_emit("claude_status", {"type": "enhancer", "text": "Enhancing prompt..."})
             enhanced_text, was_enhanced = self._run_enhancer(text)
             if was_enhanced:
@@ -858,6 +872,14 @@ class ClaudeCodeSession:
                 self._safe_emit("claude_status", {"type": "enhancer", "text": "Prompt enhanced — executing..."})
             else:
                 self._safe_emit("claude_status", {"type": "enhancer", "text": ""})
+
+        # Prepend discussion guard if user is asking about a feature, not requesting an action
+        if self._is_discussion(text):
+            actual_prompt = (
+                "[DO NOT emit DIRECT_ACTION markers for this message — "
+                "the user is asking about a feature, not requesting an action.]\n\n"
+                + actual_prompt
+            )
 
         cmd = [claude_path, "-p", actual_prompt,
                "--dangerously-skip-permissions",
@@ -909,6 +931,7 @@ class ClaudeCodeSession:
         self.current_activities = []
         _dbg_text_blocks = 0
         _dbg_result_count = 0
+        _had_tool_use = False
 
         def _read_lines():
             """Read stdout in a thread-safe way (eventlet + subprocess)."""
@@ -965,6 +988,7 @@ class ClaudeCodeSession:
                                         self.services_to_restart.add(_svc)
                                         break
                         elif block.get("type") == "tool_use":
+                            _had_tool_use = True
                             name = block.get("name", "")
                             inp = block.get("input", {})
                             print(f"[debug] TOOL_USE: {name} {inp.get('command','')[:80] if name=='Bash' else ''}", flush=True)
@@ -1054,6 +1078,27 @@ class ClaudeCodeSession:
             self._safe_emit("claude_raw", {"data": "STDERR: " + stderr_output})
 
         response = "\n".join(response_parts).strip() if response_parts else ""
+
+        # Check for DIRECT_ACTION marker from Claude Code
+        # Only honor if it appeared in the first text block with no tool_use before it.
+        # A real direct action intent means Claude emits ONLY the marker immediately.
+        da_marker = '<!--DIRECT_ACTION:'
+        if da_marker in response:
+            da_match = re.search(r'<!--DIRECT_ACTION:(\w+)-->', response)
+            if da_match:
+                action_name = da_match.group(1)
+                if _had_tool_use or _dbg_text_blocks > 1:
+                    print(f"[debug] DIRECT_ACTION '{action_name}' ignored: tool_use={_had_tool_use}, text_blocks={_dbg_text_blocks}", flush=True)
+                    # Strip the marker from the response and show it as normal text
+                    response = re.sub(r'<!--DIRECT_ACTION:\w+-->\s*', '', response).strip()
+                else:
+                    print(f"[debug] DIRECT_ACTION detected: {action_name}", flush=True)
+                    self._handle_direct(action_name, {"raw_text": ""})
+                    _save_message(self.db_session_id, "assistant", f"[direct action: {action_name}]", self.current_activities)
+                    self.busy = False
+                    self.process = None
+                    self._emit_state("ready")
+                    return
 
         print(f"[debug] TOTALS: {_dbg_text_blocks} text blocks, {_dbg_result_count} results, {len(self.current_activities)} activities", flush=True)
         print(f"[debug] SERVICES TO RESTART: {self.services_to_restart}", flush=True)

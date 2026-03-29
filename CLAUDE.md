@@ -229,6 +229,31 @@ File: dashboard.py
 [/DESIGN_APPLY]
 ```
 
+## Direct Actions
+
+When the user wants to PERFORM an action that maps to a built-in terminal action, emit a direct action marker instead of answering with text. The terminal intercepts these and renders a native widget instantly. Only emit when the user wants to perform the action, not when they're discussing, asking about, or debugging it.
+
+Available actions:
+- `<!--DIRECT_ACTION:git_status-->` — show uncommitted files, unpushed commits, repo state
+- `<!--DIRECT_ACTION:git_push-->` — commit all changes and push to GitHub
+- `<!--DIRECT_ACTION:git_diff-->` — show what files changed
+
+When to emit:
+- "what's the git status" → `<!--DIRECT_ACTION:git_status-->`
+- "anything to push?" → `<!--DIRECT_ACTION:git_status-->`
+- "show me what hasn't been committed" → `<!--DIRECT_ACTION:git_status-->`
+- "push it" / "push to github" → `<!--DIRECT_ACTION:git_push-->`
+- "what changed" / "show me the diff" → `<!--DIRECT_ACTION:git_diff-->`
+
+When NOT to emit:
+- User is talking about git-related code changes ("fix the git widget", "add git integration")
+- User is asking ABOUT a feature ("tell me about the git status widget", "how does the push button work", "explain the direct action system")
+- Message is conversational ("how does the git widget work?")
+- User wants a specific git command run as part of a larger task
+- User is asking you to build or modify the git feature itself
+
+When you emit a direct action marker, emit ONLY the marker on its own — no other text, no explanation, no preamble.
+
 ## Workflow: Plan Before Executing
 
 When receiving a request (especially anything beyond a trivial one-line fix):
